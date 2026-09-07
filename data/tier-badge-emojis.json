@@ -1,0 +1,50 @@
+{
+  "T1": {
+    "emojiId": "1534803335843020921",
+    "emojiName": "t1badge",
+    "tag": "<:t1badge:1534803335843020921>",
+    "roleIconPath": "assets\\tier-badges\\resized\\t1-role-icon.png"
+  },
+  "T2": {
+    "emojiId": "1534803337487187978",
+    "emojiName": "t2badge",
+    "tag": "<:t2badge:1534803337487187978>",
+    "roleIconPath": "assets\\tier-badges\\resized\\t2-role-icon.png"
+  },
+  "T3": {
+    "emojiId": "1534803339353788427",
+    "emojiName": "t3badge",
+    "tag": "<:t3badge:1534803339353788427>",
+    "roleIconPath": "assets\\tier-badges\\resized\\t3-role-icon.png"
+  },
+  "T4": {
+    "emojiId": "1534803341199278163",
+    "emojiName": "t4badge",
+    "tag": "<:t4badge:1534803341199278163>",
+    "roleIconPath": "assets\\tier-badges\\resized\\t4-role-icon.png"
+  },
+  "T5": {
+    "emojiId": "1534803343887700159",
+    "emojiName": "t5badge",
+    "tag": "<:t5badge:1534803343887700159>",
+    "roleIconPath": "assets\\tier-badges\\resized\\t5-role-icon.png"
+  },
+  "T6": {
+    "emojiId": "1534803346651877428",
+    "emojiName": "t6badge",
+    "tag": "<:t6badge:1534803346651877428>",
+    "roleIconPath": "assets\\tier-badges\\resized\\t6-role-icon.png"
+  },
+  "T7": {
+    "emojiId": "1534803355900182528",
+    "emojiName": "t7badge",
+    "tag": "<:t7badge:1534803355900182528>",
+    "roleIconPath": "assets\\tier-badges\\resized\\t7-role-icon.png"
+  },
+  "MAXED_OUT": {
+    "emojiId": "1534803357728899082",
+    "emojiName": "maxedout",
+    "tag": "<:maxedout:1534803357728899082>",
+    "roleIconPath": "assets\\tier-badges\\resized\\maxed_out-role-icon.png"
+  }
+}
