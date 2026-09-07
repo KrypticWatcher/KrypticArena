@@ -2,7 +2,7 @@ import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
 import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity } from './construction.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
@@ -14,7 +14,7 @@ import { recordLastTripSettings, skillRepeatTripRow } from './lastTripSettings.j
 export const CRAFTING_TRIP_TYPE = 'crafting';
 
 const FULL_TRIP_MINUTES = 30;
-const MIN_TRIP_SECONDS = 30;
+const MIN_TRIP_SECONDS = 10;
 const MAX_YIELD_BY_TIER = { 1: 100, 5: 95, 10: 90, 20: 85, 35: 78, 45: 70, 55: 62, 65: 55, 75: 48, 85: 42, 92: 38 };
 
 const XP_PER_UNIT_BY_TIER = { 1: 4, 5: 5, 10: 6, 20: 8, 35: 12, 45: 15, 55: 18, 65: 21, 75: 25, 85: 29, 92: 33 };
@@ -132,7 +132,10 @@ export async function startCraftingTrip(guildId, userId, channelId, fallbackName
   if (missing.length > 0) throw new EconomyError(`You're missing: ${missing.join(', ')}.`);
 
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-  const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeCraftingTripSeconds(tier, quantity);
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'crafting');
+  const tripSeconds = hasInstantTrips(guildId, userId)
+    ? 30
+    : applyConstructionTripTimeReduction(computeCraftingTripSeconds(tier, quantity), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `crafting:${productId}`;

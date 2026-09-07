@@ -22,10 +22,10 @@ import {
 } from './gladiator.js';
 import { buildBossChallengeStatusLine, resolveDueBossFight } from './bossChallenges.js';
 import { resolveDueSlay } from './slay.js';
-import { resolveDueGathering } from './gathering.js';
+import { resolveDueGathering, resolveDueMultiResourceTrip } from './gathering.js';
 import { resolveDueCooking } from './cooking.js';
 import { resolveDueHerbalism } from './herbalism.js';
-import { resolveDueHunting } from './hunting.js';
+import { resolveDueHunting, resolveDueLodgeTrip } from './hunting.js';
 import { resolveDueSmelt, resolveDueSmith } from './smithing.js';
 import { resolveDueFletching } from './fletching.js';
 import { resolveDueCrafting } from './crafting.js';
@@ -273,6 +273,10 @@ export async function resolveDueAdventure(row) {
   if (row.active_mob_id?.startsWith('gathering:')) {
     return resolveDueGathering(row);
   }
+
+  if (row.active_mob_id?.startsWith('multires:')) {
+    return resolveDueMultiResourceTrip(row);
+  }
   if (row.active_mob_id?.startsWith('cooking:')) {
     return resolveDueCooking(row);
   }
@@ -281,6 +285,9 @@ export async function resolveDueAdventure(row) {
   }
   if (row.active_mob_id?.startsWith('hunting:')) {
     return resolveDueHunting(row);
+  }
+  if (row.active_mob_id?.startsWith('lodge:')) {
+    return resolveDueLodgeTrip(row);
   }
   if (row.active_mob_id?.startsWith('smelt:')) {
     return resolveDueSmelt(row);

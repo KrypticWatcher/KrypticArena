@@ -9,12 +9,12 @@ import db from '../database.js';
 import { rollSpecialToolFind } from './specialToolFinds.js';
 import { recordLastTripSettings, skillRepeatTripRow } from './lastTripSettings.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity } from './construction.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 
 export const FLETCHING_TRIP_TYPE = 'fletching';
 
 const FULL_TRIP_MINUTES = 30;
-const MIN_TRIP_SECONDS = 30;
+const MIN_TRIP_SECONDS = 10;
 const MAX_YIELD_BY_TIER = { 1: 100, 5: 95, 10: 90, 20: 85, 35: 78, 45: 70, 55: 62, 65: 55, 75: 48, 85: 42, 92: 38 };
 
 const XP_PER_UNIT_BY_TIER = { 1: 4, 5: 5, 10: 6, 20: 8, 35: 12, 45: 15, 55: 18, 65: 21, 75: 25, 85: 29, 92: 33 };
@@ -25,8 +25,12 @@ const BARS_PER_ROD = 1;
 const LOGS_PER_STAVE = 2;
 const HERBS_PER_STAVE = 2;
 
-export function getMaxFletchingQuantity(tier) {
-  return MAX_YIELD_BY_TIER[tier] ?? 50;
+const BOOSTED_QUANTITY_MULTIPLIER = 1.5;
+const BOOSTED_SPEED_MULTIPLIER = 0.7;
+
+export function getMaxFletchingQuantity(tier, useBoostedMode = false) {
+  const base = MAX_YIELD_BY_TIER[tier] ?? 50;
+  return useBoostedMode ? Math.round(base * BOOSTED_QUANTITY_MULTIPLIER) : base;
 }
 
 export function getAffordableFletchingQuantity(guildId, userId, itemType, key, requestedQuantity) {
@@ -85,9 +89,9 @@ export function getAffordableFletchingQuantity(guildId, userId, itemType, key, r
   return Math.max(0, Math.min(requestedQuantity, affordableByLogs, affordableByFeathers, affordableByArrowheads));
 }
 
-export function computeFletchingTripSeconds(tier, quantity) {
-  const maxQty = getMaxFletchingQuantity(tier);
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / maxQty;
+export function computeFletchingTripSeconds(tier, quantity, useBoostedMode = false) {
+  const normalMaxQty = getMaxFletchingQuantity(tier, false);
+  const secondsPerUnit = ((FULL_TRIP_MINUTES * 60) / normalMaxQty) * (useBoostedMode ? BOOSTED_SPEED_MULTIPLIER : 1);
   return Math.max(MIN_TRIP_SECONDS, Math.round(quantity * secondsPerUnit));
 }
 
@@ -147,16 +151,18 @@ export function getStaveProductsForTier(tier) {
 
 export function describeFletchingActiveTrip(activeMobId, timestamp) {
   if (!activeMobId || !activeMobId.startsWith('fletching:')) return null;
-  const [, itemType, keyStr] = activeMobId.split(':');
+  const parts = activeMobId.split(':');
+  const [, itemType, keyStr] = parts;
+  const forgeNote = parts[3] === 'boosted' ? " at the Fletcher's Workbench" : '';
   if (itemType === 'bow' || itemType === 'rod' || itemType === 'stave') {
     const product = getItem(Number(keyStr));
-    return `🪶 Out fletching **${product ? product.name : 'gear'}**. Back ${timestamp}.`;
+    return `🪶 Out fletching${forgeNote} **${product ? product.name : 'gear'}**. Back ${timestamp}.`;
   }
   const arrow = getArrow(Number(keyStr));
-  return `🪶 Out fletching **${arrow ? arrow.name : 'arrows'}**. Back ${timestamp}.`;
+  return `🪶 Out fletching${forgeNote} **${arrow ? arrow.name : 'arrows'}**. Back ${timestamp}.`;
 }
 
-export async function startFletchingTrip(guildId, userId, channelId, fallbackName, itemType, key, quantity) {
+export async function startFletchingTrip(guildId, userId, channelId, fallbackName, itemType, key, quantity, useBoostedMode = false) {
   guildId = GLOBAL_ID;
   if (isGladiatorAdventuring(guildId, userId)) {
     const profile = getGladiatorProfile(guildId, userId, fallbackName);
@@ -172,6 +178,10 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     throw new EconomyError('You need a Knife to Fletch at all — buy one from the Arena Store.');
   }
 
+  if (useBoostedMode && getProjectCurrentTier(userId, 'fletchers_bench') < 1) {
+    throw new EconomyError("You need to build the Fletcher's Workbench (Tier 1+) to use Boosted Mode — see /building.");
+  }
+
   if (itemType === 'bow') {
     const product = getItem(key);
     if (!product || !isBowProduct(product)) throw new EconomyError('Invalid bow.');
@@ -182,7 +192,7 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     const currentLevel = getSkillLevel(guildId, userId, 'fletching');
     if (currentLevel < tier) throw new EconomyError(`You need Fletching level ${tier} [You are Level ${currentLevel}].`);
 
-    const maxQty = getMaxFletchingQuantity(tier);
+    const maxQty = getMaxFletchingQuantity(tier, useBoostedMode);
     const constructionReductionPercent = getConstructionCostReductionPercent(userId, 'fletching');
     const ownedLogs = getOwnedQuantity(guildId, userId, log.id);
 
@@ -204,14 +214,17 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     }
 
     const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-    const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeFletchingTripSeconds(tier, quantity);
+    const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'fletching');
+    const tripSeconds = hasInstantTrips(guildId, userId)
+      ? 30
+      : applyConstructionTripTimeReduction(computeFletchingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
     const endsAt = Date.now() + tripSeconds * 1000;
 
-    const syntheticId = `fletching:bow:${key}`;
+    const syntheticId = useBoostedMode ? `fletching:bow:${key}:boosted` : `fletching:bow:${key}`;
     db.prepare(
       'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
     ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-    recordLastTripSettings(userId, FLETCHING_TRIP_TYPE, { itemType: 'bow', key, quantity });
+    recordLastTripSettings(userId, FLETCHING_TRIP_TYPE, { itemType: 'bow', key, quantity, useBoostedMode });
 
     addItemToInventory(guildId, userId, log.id, -logsNeeded);
     const displayName = formatGladiatorDisplayName(guildId, userId, gladiatorRow.name);
@@ -230,7 +243,7 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     const currentLevel = getSkillLevel(guildId, userId, 'fletching');
     if (currentLevel < tier) throw new EconomyError(`You need Fletching level ${tier} [You are Level ${currentLevel}].`);
 
-    const maxQty = getMaxFletchingQuantity(tier);
+    const maxQty = getMaxFletchingQuantity(tier, useBoostedMode);
     const constructionReductionPercent = getConstructionCostReductionPercent(userId, 'fletching');
     const ownedLogs = getOwnedQuantity(guildId, userId, log.id);
     const ownedBars = getOwnedQuantity(guildId, userId, bar.id);
@@ -256,14 +269,17 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     if (missing.length > 0) throw new EconomyError(`You're missing: ${missing.join(', ')}.`);
 
     const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-    const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeFletchingTripSeconds(tier, quantity);
+    const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'fletching');
+    const tripSeconds = hasInstantTrips(guildId, userId)
+      ? 30
+      : applyConstructionTripTimeReduction(computeFletchingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
     const endsAt = Date.now() + tripSeconds * 1000;
 
-    const syntheticId = `fletching:rod:${key}`;
+    const syntheticId = useBoostedMode ? `fletching:rod:${key}:boosted` : `fletching:rod:${key}`;
     db.prepare(
       'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
     ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-    recordLastTripSettings(userId, FLETCHING_TRIP_TYPE, { itemType: 'rod', key, quantity });
+    recordLastTripSettings(userId, FLETCHING_TRIP_TYPE, { itemType: 'rod', key, quantity, useBoostedMode });
 
     addItemToInventory(guildId, userId, log.id, -logsNeeded);
     addItemToInventory(guildId, userId, bar.id, -barsNeeded);
@@ -283,7 +299,7 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     const currentLevel = getSkillLevel(guildId, userId, 'fletching');
     if (currentLevel < tier) throw new EconomyError(`You need Fletching level ${tier} [You are Level ${currentLevel}].`);
 
-    const maxQty = getMaxFletchingQuantity(tier);
+    const maxQty = getMaxFletchingQuantity(tier, useBoostedMode);
     const constructionReductionPercent = getConstructionCostReductionPercent(userId, 'fletching');
     const ownedLogs = getOwnedQuantity(guildId, userId, log.id);
     const ownedHerbs = getOwnedQuantity(guildId, userId, herb.id);
@@ -309,14 +325,17 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     if (missing.length > 0) throw new EconomyError(`You're missing: ${missing.join(', ')}.`);
 
     const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-    const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeFletchingTripSeconds(tier, quantity);
+    const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'fletching');
+    const tripSeconds = hasInstantTrips(guildId, userId)
+      ? 30
+      : applyConstructionTripTimeReduction(computeFletchingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
     const endsAt = Date.now() + tripSeconds * 1000;
 
-    const syntheticId = `fletching:stave:${key}`;
+    const syntheticId = useBoostedMode ? `fletching:stave:${key}:boosted` : `fletching:stave:${key}`;
     db.prepare(
       'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
     ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-    recordLastTripSettings(userId, FLETCHING_TRIP_TYPE, { itemType: 'stave', key, quantity });
+    recordLastTripSettings(userId, FLETCHING_TRIP_TYPE, { itemType: 'stave', key, quantity, useBoostedMode });
 
     addItemToInventory(guildId, userId, log.id, -logsNeeded);
     addItemToInventory(guildId, userId, herb.id, -herbsNeeded);
@@ -335,7 +354,7 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
   const currentLevel = getSkillLevel(guildId, userId, 'fletching');
   if (currentLevel < tier) throw new EconomyError(`You need Fletching level ${tier} [You are Level ${currentLevel}].`);
 
-  const maxQty = getMaxFletchingQuantity(tier);
+  const maxQty = getMaxFletchingQuantity(tier, useBoostedMode);
   const constructionReductionPercent = getConstructionCostReductionPercent(userId, 'fletching');
   const ownedLogs = getOwnedQuantity(guildId, userId, log.id);
   const ownedFeathers = getOwnedQuantity(guildId, userId, feather.id);
@@ -365,14 +384,17 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
   if (missing.length > 0) throw new EconomyError(`You're missing: ${missing.join(', ')}.`);
 
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-  const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeFletchingTripSeconds(tier, quantity);
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'fletching');
+  const tripSeconds = hasInstantTrips(guildId, userId)
+    ? 30
+    : applyConstructionTripTimeReduction(computeFletchingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
-  const syntheticId = `fletching:arrow:${tier}`;
+  const syntheticId = useBoostedMode ? `fletching:arrow:${tier}:boosted` : `fletching:arrow:${tier}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-  recordLastTripSettings(userId, FLETCHING_TRIP_TYPE, { itemType: 'arrow', key: tier, quantity });
+  recordLastTripSettings(userId, FLETCHING_TRIP_TYPE, { itemType: 'arrow', key: tier, quantity, useBoostedMode });
 
   addItemToInventory(guildId, userId, log.id, -logCost);
   addItemToInventory(guildId, userId, feather.id, -featherCost);
@@ -388,7 +410,9 @@ export async function resolveDueFletching(row) {
   const userId = row.user_id;
   const name = row.name;
   const channelId = row.adventure_channel_id;
-  const [, itemType, keyStr] = row.active_mob_id.split(':');
+  const parts = row.active_mob_id.split(':');
+  const [, itemType, keyStr] = parts;
+  const useForge = parts[3] === 'boosted';
   const quantity = row.slay_quantity;
   const displayName = formatGladiatorDisplayName(guildId, userId, name);
 
@@ -401,7 +425,7 @@ export async function resolveDueFletching(row) {
     const totalXp = xpPerUnit * quantity;
     const xpResult = addSkillXp(guildId, userId, 'fletching', totalXp);
 
-    let text = `<@${userId}> **${displayName}** returns from fletching — **${quantity}x ${product.name}**.`;
+    let text = `<@${userId}> **${displayName}** returns from fletching${useForge ? " at the Fletcher's Workbench" : ''} — **${quantity}x ${product.name}**.`;
     text += `\n✨ **+${totalXp.toLocaleString('en-US')} Fletching XP**`;
     if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
 
@@ -437,7 +461,7 @@ export async function resolveDueFletching(row) {
   const totalXp = xpPerUnit * quantity;
   const xpResult = addSkillXp(guildId, userId, 'fletching', totalXp);
 
-  let text = `<@${userId}> **${displayName}** returns from fletching — **${totalYield}x ${arrow.name}**${doubledCount > 0 ? ` (${doubledCount} doubled by Arrowsmith's Knife)` : ''}.`;
+  let text = `<@${userId}> **${displayName}** returns from fletching${useForge ? " at the Fletcher's Workbench" : ''} — **${totalYield}x ${arrow.name}**${doubledCount > 0 ? ` (${doubledCount} doubled by Arrowsmith's Knife)` : ''}.`;
   if (foundKnife) text += `\n\n🗡️ You found an **Arrowsmith Knife**!`;
   text += `\n✨ **+${totalXp.toLocaleString('en-US')} Fletching XP**`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;

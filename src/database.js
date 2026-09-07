@@ -440,15 +440,27 @@ db.exec(`
   );
 
   -- Construction - 10 projects (one per gathering/production skill,
-  -- including Farming). current_tier is how many of the project's 5
-  -- tiers are FULLY complete (0-5), trips_done_this_tier tracks progress
-  -- toward the next tier's own required trip count - resets to 0 each
-  -- time a tier completes.
+  -- including Farming), 11 tiers each. current_tier is how many tiers
+  -- are FULLY complete (0-11, only advances via /building complete).
+  -- building_tier/build_ready_at track an in-progress timed build (NULL
+  -- when nothing's building) - a tier's materials are all submitted at
+  -- once when the build starts, matching /building complete is what
+  -- actually applies the tier's bonus and grants Construction XP once
+  -- build_ready_at has passed. last_collected_at drives passive
+  -- generation (Tier 5+) - accrues up to a 24h cap since the last
+  -- collect, see utils/construction.js.
+  -- trips_done_this_tier is dead weight from the old 5-tier/multi-trip
+  -- system - nothing reads or writes it anymore, left in place rather
+  -- than dealing with SQLite's DROP COLUMN ceremony for a harmless
+  -- unused column.
   CREATE TABLE IF NOT EXISTS construction_projects (
     user_id               TEXT NOT NULL,
     project_id            TEXT NOT NULL,
     current_tier          INTEGER NOT NULL DEFAULT 0,
     trips_done_this_tier  INTEGER NOT NULL DEFAULT 0,
+    building_tier         INTEGER,
+    build_ready_at        INTEGER,
+    last_collected_at     INTEGER,
     PRIMARY KEY (user_id, project_id)
   );
 
@@ -873,6 +885,17 @@ db.exec(`
 `);
 
 const guildColumns = db.prepare("PRAGMA table_info(guild_settings)").all().map((c) => c.name);
+
+const constructionColumns = db.prepare("PRAGMA table_info(construction_projects)").all().map((c) => c.name);
+if (!constructionColumns.includes('building_tier')) {
+  db.exec('ALTER TABLE construction_projects ADD COLUMN building_tier INTEGER');
+}
+if (!constructionColumns.includes('build_ready_at')) {
+  db.exec('ALTER TABLE construction_projects ADD COLUMN build_ready_at INTEGER');
+}
+if (!constructionColumns.includes('last_collected_at')) {
+  db.exec('ALTER TABLE construction_projects ADD COLUMN last_collected_at INTEGER');
+}
 if (!guildColumns.includes('deck_count')) {
   db.exec('ALTER TABLE guild_settings ADD COLUMN deck_count INTEGER NOT NULL DEFAULT 2');
 }

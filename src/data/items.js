@@ -27,55 +27,39 @@ export const LEVEL_REQUIREMENT_BY_RARITY = {
 };
 
 export const DURABILITY_LOSS_PERCENT_BY_RARITY = {
-  common: 5, 
-  uncommon: 10 / 3, 
-  rare: 100 / 45, 
-  epic: 100 / 65, 
-  legendary: 100 / 90, 
-  mythical: 100 / 130, 
+  common: 5,
+  uncommon: 10 / 3,
+  rare: 100 / 45,
+  epic: 100 / 65,
+  legendary: 100 / 90,
+  mythical: 100 / 130,
 };
 
 export const SLOT_DURABILITY_MULTIPLIER = {
-  main_hand: 1.4, 
-  off_hand: 1.2, 
-  gloves: 1.15, 
-  boots: 1.05, 
+  main_hand: 1.4,
+  off_hand: 1.2,
+  gloves: 1.15,
+  boots: 1.05,
   helmet: 0.95,
   legs: 0.9,
-  chest: 0.75, 
+  chest: 0.75,
 };
 
 export const REPAIR_COST_PER_PERCENT_BY_RARITY = {
-  common: 3, 
-  uncommon: 9, 
-  rare: 27, 
-  epic: 78, 
-  legendary: 225, 
-  mythical: 650, 
+  common: 3,
+  uncommon: 9,
+  rare: 27,
+  epic: 78,
+  legendary: 225,
+  mythical: 650,
 };
 
 const GOD_EQUIPMENT_DURABILITY_MULTIPLIER = 0.25;
 
 export function getDurabilityLossPerFight(item) {
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
   if (item.source === 'starter') return null;
-  
-  
-  
-  
-  
-  
-  
-  
+
   if (typeof item.id !== 'string') return null;
   const base = DURABILITY_LOSS_PERCENT_BY_RARITY[tierToRarity(item.tier)] ?? null;
   if (base === null) return null;
@@ -111,17 +95,15 @@ export const CHAMPION_FAIL_REDUCTION_BY_TIER = {
 };
 
 const GOD_EQUIPMENT_REPAIR_MULTIPLIER_BY_SET = {
-  warlords_conquest: 1.1, 
-  fury_of_the_three: 1.1, 
-  regalia_of_the_grave_king: 1.1, 
-  vestments_of_the_last_breath: 1.1, 
-  sovereignty_of_the_underworld: 1.15, 
+  warlords_conquest: 1.1,
+  fury_of_the_three: 1.1,
+  regalia_of_the_grave_king: 1.1,
+  vestments_of_the_last_breath: 1.1,
+  sovereignty_of_the_underworld: 1.15,
 };
 
 export function getRepairCostPerPercent(item) {
-  
-  
-  
+
   if (typeof item.id !== 'string') return null;
   const base = HADES_REPAIR_COST_PER_PERCENT_BY_RARITY[tierToRarity(item.tier)] ?? null;
   if (base === null) return null;
@@ -134,12 +116,12 @@ export function getRepairCurrency() {
 }
 
 export const HADES_REPAIR_COST_PER_PERCENT_BY_RARITY = {
-  common: 12, 
-  uncommon: 40, 
-  rare: 88, 
-  epic: 175, 
-  legendary: 300, 
-  mythical: 650, 
+  common: 12,
+  uncommon: 40,
+  rare: 88,
+  epic: 175,
+  legendary: 300,
+  mythical: 650,
 };
 
 export const SETS = {
@@ -167,12 +149,9 @@ export const SETS = {
   cassandras_ward: { name: "Cassandra's Ward" },
   aeneas_shelter: { name: "Aeneas's Shelter" },
   nemesis_grace: { name: "Nemesis's Grace" },
-  
-  
+
   hades_unseen_king: { name: "The Unseen King's Dominion" },
 
-  
-  
   warlords_conquest: { name: "Warlord's Conquest" },
   fury_of_the_three: { name: 'Fury of the Three' },
   regalia_of_the_grave_king: { name: 'Regalia of the Grave King' },
@@ -182,16 +161,7 @@ export const SETS = {
 
 export const EFFECT_TYPES = {
   CHAMPION_FAIL_REDUCTION: 'champion_fail_reduction',
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
   CHAMPION_WAGER_BOOST: 'champion_wager_boost',
   ADVENTURE_FASTER_TRIPS: 'adventure_faster_trips',
   ADVENTURE_BETTER_ENCOUNTERS: 'adventure_better_encounters',
@@ -266,11 +236,7 @@ export function getEquipmentEffectTotals(equipped) {
   for (const type of Object.values(EFFECT_TYPES)) {
     totals[type] = { total: 0, parts: [] };
   }
-  
-  
-  
-  
-  
+
   const weaponMaxByType = { [EFFECT_TYPES.GLADIATOR_XP_BONUS]: 0, [EFFECT_TYPES.CHAMPION_WAGER_BOOST]: 0 };
   for (const { label, item } of getEquipmentContributions(equipped)) {
     if (item.durability?.broken) continue;
@@ -325,42 +291,24 @@ const MULTI_EFFECT_ALLOWED_IDS = new Set([
   'tiro_ocrea',
   'tiro_caligae',
   'tiro_manica',
-  
-  
-  
-  
-  
+
   'tiro_gladius',
-  
-  
-  
-  
+
   ...['crown', 'cuirass', 'greaves_styx', 'cerberus_grip', 'charons_tread'].flatMap((piece) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythical'].map((rarity) => `hades_${piece}_${rarity}`)
   ),
-  
-  
-  
-  
-  
+
   ...['sword', 'offhand_fang', 'bow', 'scythe'].flatMap((weapon) =>
     ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythical'].map((rarity) => `hades_${weapon}_${rarity}`)
   ),
-  
-  
-  
-  
-  
-  
+
   'god_varkyros_helmet', 'god_varkyros_chest', 'god_varkyros_legs', 'god_varkyros_boots', 'god_varkyros_gloves', 'god_varkyros_weapon',
   'god_cerberus_helmet', 'god_cerberus_chest', 'god_cerberus_legs', 'god_cerberus_boots', 'god_cerberus_gloves', 'god_cerberus_weapon',
   'god_acheron_helmet', 'god_acheron_chest', 'god_acheron_legs', 'god_acheron_boots', 'god_acheron_gloves', 'god_acheron_weapon',
 ]);
 
 export const ITEMS = [
-  
-  
-  
+
   {
     id: 33001,
     name: 'Iron Arrowhead',
@@ -471,11 +419,7 @@ export const ITEMS = [
     price: 460,
     description: 'Sovereign Arrowhead - a Smithing product, used in Fletching.',
   },
-  
-  
-  
-  
-  
+
   {
     id: 28021,
     name: 'Poor Rabbit Hide',
@@ -718,12 +662,7 @@ export const ITEMS = [
     price: 1600,
     description: 'Perfect Eternal Stag Hide - a flawless catch, worth more and halves Crafting material cost.',
   },
-  
-  
-  
-  
-  
-  
+
   {
     id: 28051,
     name: 'Tanned Rabbit Hide',
@@ -834,7 +773,7 @@ export const ITEMS = [
     price: 1600,
     description: 'Tanned Eternal Stag Hide - a Tier 92 Crafting material.',
   },
-  
+
   {
     id: 10001,
     name: "Centurion Helmet",
@@ -5762,113 +5701,113 @@ export const ITEMS = [
   },
   {
     id: 24001,
-    name: 'Trout',
+    name: 'Raw Trout',
     type: 'resource',
     category: 'raw_fish',
     tier: 1,
     stackable: true,
     price: 1,
-    description: 'Trout - a Tier 1 resource.',
+    description: 'Raw Trout - a Tier 1 resource.',
   },
   {
     id: 24002,
-    name: 'Perch',
+    name: 'Raw Perch',
     type: 'resource',
     category: 'raw_fish',
     tier: 5,
     stackable: true,
     price: 11,
-    description: 'Perch - a Tier 2 resource.',
+    description: 'Raw Perch - a Tier 2 resource.',
   },
   {
     id: 24003,
-    name: 'Salmon',
+    name: 'Raw Salmon',
     type: 'resource',
     category: 'raw_fish',
     tier: 10,
     stackable: true,
     price: 39,
-    description: 'Salmon - a Tier 3 resource.',
+    description: 'Raw Salmon - a Tier 3 resource.',
   },
   {
     id: 24004,
-    name: 'Pike',
+    name: 'Raw Pike',
     type: 'resource',
     category: 'raw_fish',
     tier: 20,
     stackable: true,
     price: 82,
-    description: 'Pike - a Tier 4 resource.',
+    description: 'Raw Pike - a Tier 4 resource.',
   },
   {
     id: 24005,
-    name: 'Sturgeon',
+    name: 'Raw Sturgeon',
     type: 'resource',
     category: 'raw_fish',
     tier: 35,
     stackable: true,
     price: 141,
-    description: 'Sturgeon - a Tier 5 resource.',
+    description: 'Raw Sturgeon - a Tier 5 resource.',
   },
   {
     id: 24006,
-    name: 'Emberfin',
+    name: 'Raw Emberfin',
     type: 'resource',
     category: 'raw_fish',
     tier: 45,
     stackable: true,
     price: 215,
-    description: 'Emberfin - a Tier 6 resource.',
+    description: 'Raw Emberfin - a Tier 6 resource.',
   },
   {
     id: 24007,
-    name: 'Ironscale',
+    name: 'Raw Ironscale',
     type: 'resource',
     category: 'raw_fish',
     tier: 55,
     stackable: true,
     price: 304,
-    description: 'Ironscale - a Tier 7 resource.',
+    description: 'Raw Ironscale - a Tier 7 resource.',
   },
   {
     id: 24008,
-    name: 'Stormtail',
+    name: 'Raw Stormtail',
     type: 'resource',
     category: 'raw_fish',
     tier: 65,
     stackable: true,
     price: 407,
-    description: 'Stormtail - a Tier 8 resource.',
+    description: 'Raw Stormtail - a Tier 8 resource.',
   },
   {
     id: 24009,
-    name: 'Duskgill',
+    name: 'Raw Duskgill',
     type: 'resource',
     category: 'raw_fish',
     tier: 75,
     stackable: true,
     price: 524,
-    description: 'Duskgill - a Tier 9 resource.',
+    description: 'Raw Duskgill - a Tier 9 resource.',
   },
   {
     id: 24010,
-    name: 'Godfin',
+    name: 'Raw Godfin',
     type: 'resource',
     category: 'raw_fish',
     tier: 85,
     stackable: true,
     price: 655,
-    description: 'Godfin - a Tier 10 resource.',
+    description: 'Raw Godfin - a Tier 10 resource.',
   },
   {
     id: 24011,
-    name: 'Leviathan',
+    name: 'Raw Leviathan',
     type: 'resource',
     category: 'raw_fish',
     tier: 92,
     stackable: true,
     price: 800,
-    description: 'Leviathan - a Tier 11 resource.',
+    description: 'Raw Leviathan - a Tier 11 resource.',
   },
   {
     id: 25001,
@@ -8148,14 +8087,6 @@ export const ITEMS = [
     description: 'Sovereignty of the Underworld - Aegis - a rare god-tier drop from Hades, boosted well above standard Tier 11 gear.',
   },
 
-  
-  
-  
-  
-  
-  
-  
-
   {
     id: 'tiro_galea',
     name: "Recruit's Helmet",
@@ -8260,12 +8191,6 @@ export const ITEMS = [
     price: null,
     description: 'Standard-issue kit from the ludus - every gladiator starts here, none stay here long.',
   },
-
-  
-  
-  
-  
-  
 
   {
     id: 'crixus_bulwark_galea',
@@ -8627,17 +8552,6 @@ export const ITEMS = [
     description: 'The name Rome tried hardest to erase, and failed hardest to.',
   },
 
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
   {
     id: 'fortunas_favor_galea',
     name: "Fortuna's Crown",
@@ -8762,25 +8676,6 @@ export const ITEMS = [
     description: 'A shield that has never once been struck by anything the wielder minded losing to.',
   },
 
-  
-  
-  
-  
-  
-  
-  
-  
-
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
   {
     id: 'scouts_kit_galea',
     name: "Scout's Cap",
@@ -8868,10 +8763,7 @@ export const ITEMS = [
   },
 
   {
-    
-    
-    
-    
+
     id: 'scouts_kit_buckler',
     name: "Scout's Buckler",
     type: 'equipment',
@@ -8973,11 +8865,7 @@ export const ITEMS = [
   },
 
   {
-    
-    
-    
-    
-    
+
     id: 'trappers_gear_Shortsword',
     name: "Trapper Shortsword",
     type: 'equipment',
@@ -9080,9 +8968,7 @@ export const ITEMS = [
   },
 
   {
-    
-    
-    
+
     id: 'sentrys_watch_buckler',
     name: "Sentry's Bulwark",
     type: 'equipment',
@@ -10372,29 +10258,6 @@ export const ITEMS = [
     description: "The gladiators' own goddess - patron of balance, and the only one who decides who overreaches and who doesn't.",
   },
 
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
   {
     id: 'tiro_gladius',
     name: 'Training Gladius',
@@ -10538,9 +10401,7 @@ export const ITEMS = [
   },
 
   {
-    
-    
-    
+
     id: 'cursors_relay_buckler',
     name: "Courier's Guard",
     type: 'equipment',
@@ -10651,12 +10512,7 @@ export const ITEMS = [
   },
 
   {
-    
-    
-    
-    
-    
-    
+
     id: 'mercurys_wing_codex',
     name: "Mercury's Codex",
     type: 'equipment',
@@ -10682,11 +10538,7 @@ export const ITEMS = [
     set: 'venators_snare',
     source: 'adventure',
     levelRequirement: 10,
-    
-    
-    
-    
-    
+
     twoHanded: true,
     effects: [{ type: EFFECT_TYPES.GLADIATOR_XP_BONUS, value: 5 }],
     price: null,
@@ -10781,10 +10633,7 @@ export const ITEMS = [
     weaponType: 'sword',
     tier: 10,
     set: 'custos_aegis',
-    
-    
-    
-    
+
     source: 'adventure',
     levelRequirement: 10,
     twoHanded: false,
@@ -10800,7 +10649,7 @@ export const ITEMS = [
     slot: 'off_hand',
     tier: 10,
     set: 'custos_aegis',
-    source: 'adventure', 
+    source: 'adventure',
     levelRequirement: 10,
     twoHanded: false,
     effects: [],
@@ -10816,8 +10665,7 @@ export const ITEMS = [
     weaponType: 'spear',
     tier: 20,
     set: 'horatius_stand',
-    
-    
+
     source: 'adventure',
     levelRequirement: 25,
     twoHanded: false,
@@ -10833,7 +10681,7 @@ export const ITEMS = [
     slot: 'off_hand',
     tier: 20,
     set: 'horatius_stand',
-    source: 'adventure', 
+    source: 'adventure',
     levelRequirement: 25,
     twoHanded: false,
     effects: [],
@@ -10849,8 +10697,7 @@ export const ITEMS = [
     weaponType: 'dagger',
     tier: 45,
     set: 'cassandras_ward',
-    
-    
+
     source: 'adventure',
     levelRequirement: 45,
     twoHanded: false,
@@ -10860,10 +10707,7 @@ export const ITEMS = [
   },
 
   {
-    
-    
-    
-    
+
     id: 'cassandras_ward_veil',
     name: "Cassandra's Veil",
     type: 'equipment',
@@ -10886,9 +10730,7 @@ export const ITEMS = [
     weaponType: 'spear',
     tier: 65,
     set: 'aeneas_shelter',
-    
-    
-    
+
     source: 'adventure',
     levelRequirement: 65,
     twoHanded: false,
@@ -10904,7 +10746,7 @@ export const ITEMS = [
     slot: 'off_hand',
     tier: 65,
     set: 'aeneas_shelter',
-    source: 'adventure', 
+    source: 'adventure',
     levelRequirement: 65,
     twoHanded: false,
     effects: [],
@@ -10944,20 +10786,6 @@ export const ITEMS = [
     description: 'Its twin - together, they never tip too far either way.',
   },
 
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
   {
     id: 'ticket_stub_grand_melee',
     name: 'Ticket Stub from the Grand Melee',
@@ -10970,7 +10798,6 @@ export const ITEMS = [
     description: 'A souvenir from a fight everyone still talks about.',
   },
 
-  
   {
     id: 'tarnished_coin_pouch',
     name: 'Tarnished Coin Pouch',
@@ -11008,13 +10835,6 @@ export const ITEMS = [
     description: 'Your daily cut of the arena books — a little of both currencies, once a day.',
   },
 
-  
-  
-  
-  
-  
-  
-  
   {
     id: 'copper_luck_token',
     name: 'Copper Luck Token',
@@ -11084,11 +10904,7 @@ export const ITEMS = [
     effects: [],
     price: 750000,
     source: 'store',
-    
-    
-    
-    
-    
+
     claim: { gambling: { min: 540, max: 730 }, arena: { min: 380, max: 520 } },
     description: "A few drops remain — enough, apparently, to keep paying out.",
   },
@@ -11103,12 +10919,7 @@ export const ITEMS = [
     priceArena: 5000,
     source: 'store',
     capOwnedAt1: true,
-    
-    
-    
-    
-    
-    
+
     grantsBadge: { emoji: '🏛️', label: 'Founder' },
     description: "Proof you were here from the start. Doesn't do anything — yet.",
   },
@@ -11140,8 +10951,6 @@ export const ITEMS = [
     description: 'A restorative brew every gladiator carries before heading out.',
   },
 
-  
-  
   {
     id: 'champions_signet',
     name: "Champion's Signet",
@@ -11155,16 +10964,6 @@ export const ITEMS = [
     description: "Torn from the Champion's own hand. Rumor is it still pays out.",
   },
 
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
   {
     id: 'champions_crown',
     name: "Champion's Crown",
@@ -11205,14 +11004,6 @@ export const ITEMS = [
     description: 'A token pressed into the hand of a gladiator the Emperor himself remembered.',
   },
 
-  
-  
-  
-  
-  
-  
-  
-  
   {
     id: 'laurel_of_the_undying',
     name: 'Laurel of the Undying',
@@ -11225,27 +11016,6 @@ export const ITEMS = [
     claim: { gambling: { min: 6090, max: 8240 }, arena: { min: 8595, max: 11625 } },
     description: 'Worn only by those who never stopped. There is nothing left to prove.',
   },
-
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
 
   {
     id: 'hades_crown_common',
@@ -12531,16 +12301,6 @@ export const ITEMS = [
     description: 'The Underworld doesn\'t fill itself.',
   },
 
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
   {
     id: 'god_varkyros_helmet',
     name: "Warlord's Crested Helm",
@@ -13000,21 +12760,7 @@ export const ITEMS = [
     price: null,
     description: "Divine wargear belonging to the God of the Underworld, forged in blackened metal and ancient gold and wreathed in emerald flame. Adorned with skulls, chains and the symbols of his realm, each piece carries a fragment of the authority Hades holds over the dead. (Sovereignty of the Underworld)",
   },
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
   {
     id: 'focus_attack',
     name: 'Attack Candy',
@@ -13313,13 +13059,6 @@ export const ITEMS = [
     description: "Grainy footage, but a face is a face. Whatever they were hiding behind doesn't matter once it's on tape.",
   },
 
-  
-  
-  
-  
-  
-  
-  
   {
     id: 'heist_lockpick_set',
     heistCategory: 'tool',
@@ -13440,27 +13179,12 @@ export function getItem(itemId) {
 }
 
 export function isEquipment(item) {
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
+
   return item?.type === 'equipment' || ((item?.type === 'tool' || item?.type === 'outfit') && item?.slot);
 }
 
 export function isCollectable(item) {
-  
-  
-  
-  
-  
-  
-  
+
   return item?.type === 'collectable' || item?.type === 'resource';
 }
 
@@ -13482,18 +13206,16 @@ export function getStarterCollectibles() {
 
 export function getStarterKitItems() {
   const starterItemIds = new Set([
-    
-    18001, 
-    18008, 
-    18015, 
-    18022, 
-    18029, 
 
-    
-    18043, 
-    16009, 
+    18001,
+    18008,
+    18015,
+    18022,
+    18029,
 
-    
+    18043,
+    16009,
+
     'tarnished_coin_pouch',
     'arena_signet',
     'stewards_ledger',

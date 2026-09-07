@@ -18,7 +18,7 @@ import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
-import { getConstructionYieldBoostPercent, applyConstructionYieldBoost } from './construction.js';
+import { getConstructionYieldBoostPercent, applyConstructionYieldBoost, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
 
 const PATCH_TYPES = ['herb', 'tree', 'fruit'];
 
@@ -85,9 +85,10 @@ function getGrownItem(seed, patchType) {
   return null;
 }
 
-function computeGrowthMs(seed, patchType, hasMasterCompost) {
+function computeGrowthMs(seed, patchType, hasMasterCompost, constructionTripTimeReductionPercent) {
   const baseGrowthMs = patchType === 'tree' ? treeGrowthMs(seed.tier) : GROWTH_MS[patchType];
-  return hasMasterCompost ? Math.round(baseGrowthMs * 0.75) : baseGrowthMs;
+  const compostAdjusted = hasMasterCompost ? Math.round(baseGrowthMs * 0.75) : baseGrowthMs;
+  return applyConstructionTripTimeReduction(compostAdjusted, constructionTripTimeReductionPercent);
 }
 
 function writeFarmingTrip(guildId, userId, endsAt, channelId, mode, tripData) {
@@ -216,6 +217,7 @@ export async function resolveDueFarmingPlant(row) {
   const { plan } = JSON.parse(row.farming_trip_json);
 
   const hasMasterCompost = getOwnedQuantity(guildId, userId, MASTER_COMPOST_ID) > 0;
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'farming');
   const plantedAt = Date.now();
   const lines = [];
 
@@ -223,7 +225,7 @@ export async function resolveDueFarmingPlant(row) {
     const entry = plan[patchType];
     if (!entry) continue;
     const seed = getItem(entry.seedItemId);
-    const growthMs = computeGrowthMs(seed, patchType, hasMasterCompost);
+    const growthMs = computeGrowthMs(seed, patchType, hasMasterCompost, constructionTripTimeReductionPercent);
     const readyAt = plantedAt + growthMs;
     for (const idx of entry.patchIndexes) {
       stmtUpsertPatch.run(userId, patchType, idx, seed.id, plantedAt, readyAt);
@@ -444,6 +446,7 @@ export async function resolveDueFarmingReplant(row) {
   }
 
   let alreadyHasCompost = getOwnedQuantity(guildId, userId, MASTER_COMPOST_ID) > 0;
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'farming');
   const results = [];
   const replantedTally = new Map();
   let leftEmptyCount = 0;
@@ -456,7 +459,7 @@ export async function resolveDueFarmingReplant(row) {
 
       if (replantLookup.has(`${patchType}:${patchIndex}`)) {
         const seed = getItem(replant[patchType].find((e) => e.index === patchIndex).seedItemId);
-        const growthMs = computeGrowthMs(seed, patchType, alreadyHasCompost);
+        const growthMs = computeGrowthMs(seed, patchType, alreadyHasCompost, constructionTripTimeReductionPercent);
         const plantedAt = Date.now();
         const readyAt = plantedAt + growthMs;
         stmtUpsertPatch.run(userId, patchType, patchIndex, seed.id, plantedAt, readyAt);

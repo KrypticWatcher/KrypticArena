@@ -12,7 +12,7 @@ import { recordLastTripSettings, skillRepeatTripRow } from './lastTripSettings.j
 export const TANNING_TRIP_TYPE = 'tanning';
 
 const FULL_TRIP_MINUTES = 30;
-const MIN_TRIP_SECONDS = 30;
+const MIN_TRIP_SECONDS = 10;
 const MAX_RAW_HIDES_BY_TIER = { 1: 100, 5: 95, 10: 90, 20: 85, 35: 78, 45: 70, 55: 62, 65: 55, 75: 48, 85: 42, 92: 38 };
 const PERFECT_TAN_YIELD = 2;
 

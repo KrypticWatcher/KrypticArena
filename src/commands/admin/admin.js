@@ -61,6 +61,7 @@ import {
   resetUserArenaStats,
   resetUserCasinoStats,
   resetUserStarterClaim,
+  resetUserConstruction,
   resetUserEverything,
 } from '../../utils/adminReset.js';
 
@@ -177,6 +178,16 @@ const RESET_TYPES = {
       `if the flag got stuck without them actually receiving anything; otherwise clear their starter ` +
       `items first (Inventory reset or Remove Asset), then use this.`,
   },
+  'reset-construction': {
+    label: 'Construction (migration)',
+    apply: resetUserConstruction,
+    auditAction: ADMIN_ACTIONS.RESET_CONSTRUCTION,
+    description: (name) =>
+      `This wipes **${name}**'s Construction project progress (every project back to Tier 0, any ` +
+      `in-progress build cancelled) and their Construction skill level/XP back to 0. Intended as a ` +
+      `one-time migration tool for the 11-tier Construction rework, since the old tier numbers don't ` +
+      `mean the same thing under the new system. Does not touch any other skill, inventory, or currency.`,
+  },
 };
 
 export default {
@@ -192,7 +203,6 @@ export default {
     return interaction.reply({ embeds, components, ephemeral: true });
   },
 
-  
   async handleButton(interaction) {
     const parsed = parseButtonCustomId(interaction.customId);
     if (!parsed) return false;
@@ -207,14 +217,12 @@ export default {
       return true;
     }
 
-    
     if (NAV_ACTIONS.has(action)) {
       const payload = await renderScreen(guildId, targetUser, screen);
       await interaction.update({ attachments: [], ...payload });
       return true;
     }
 
-    
     if (['balance-cash', 'balance-bank', 'balance-arena'].includes(screen)) {
       const currency = screen.replace('balance-', '');
       const label = currency === 'arena' ? 'Arena Coins' : currency === 'cash' ? 'Cash' : 'Bank';
@@ -231,13 +239,6 @@ export default {
       return true;
     }
 
-    
-    
-    
-    
-    
-    
-    
     if (screen === 'inventory-give' || screen === 'inventory-remove') {
       const isGive = screen === 'inventory-give';
       const modal = new ModalBuilder()
@@ -257,7 +258,6 @@ export default {
       return true;
     }
 
-    
     if (screen === 'gladiator-xp') {
       const verb = action === 'add' ? 'Add' : action === 'remove' ? 'Remove' : 'Set';
       const modal = buildValueModal({
@@ -272,7 +272,6 @@ export default {
       return true;
     }
 
-    
     if (screen === 'gladiator-rename') {
       const gladiator = getGladiatorRow(guildId, targetUserId);
       const modal = buildValueModal({
@@ -287,7 +286,6 @@ export default {
       return true;
     }
 
-    
     if (screen === 'gladiator-namelock' && action === 'toggle') {
       const row = getGladiatorRow(guildId, targetUserId);
       if (row?.name_locked) {
@@ -301,7 +299,6 @@ export default {
       return true;
     }
 
-    
     if (screen === 'gladiator-instanttrips' && action === 'toggle') {
       const row = getGladiatorRow(guildId, targetUserId);
       if (row?.instant_trips) {
@@ -315,7 +312,6 @@ export default {
       return true;
     }
 
-    
     if (screen === 'adventure' && (action === 'complete' || action === 'cancel')) {
       const row = getGladiatorRow(guildId, targetUserId);
       if (!row || !(row.adventure_ends_at > 0)) {
@@ -339,13 +335,7 @@ export default {
           recordRepeatButton(guildId, targetUserId, channelId, message.id);
         } catch (err) {
           console.error("Couldn't post force-completed Adventure result:", err.message);
-          
-          
-          
-          
-          
-          
-          
+
           postError = { channelId, message: err.message };
         }
       } else {
@@ -366,7 +356,6 @@ export default {
       return true;
     }
 
-    
     if (screen.startsWith('durability-item~')) {
       const instanceId = screen.split('~')[1];
       if (action === 'set') {
@@ -421,7 +410,6 @@ export default {
       }
     }
 
-    
     if (screen === 'reset-everything') {
       if (action === 'ask') {
         const payload = buildConfirmationPanel({
@@ -455,12 +443,10 @@ export default {
       }
     }
 
-    
     await interaction.update(buildTopPanel(targetUser));
     return true;
   },
 
-  
   async handleSelect(interaction) {
     const parsed = parseSelectCustomId(interaction.customId);
     if (!parsed) return false;
@@ -480,7 +466,6 @@ export default {
     return true;
   },
 
-  
   async handleModal(interaction) {
     const parsed = parseModalCustomId(interaction.customId);
     if (!parsed) return false;
@@ -492,7 +477,7 @@ export default {
     const settings = ensureGuild(guildId);
 
     try {
-      
+
       if (['balance-cash', 'balance-bank', 'balance-arena'].includes(screen)) {
         const currency = screen.replace('balance-', '');
         const raw = interaction.fields.getTextInputValue('value');
@@ -528,10 +513,6 @@ export default {
         return true;
       }
 
-      
-      
-      
-      
       if (screen === 'inventory-give' || screen === 'inventory-remove') {
         const isGive = screen === 'inventory-give';
         const text = interaction.fields.getTextInputValue('items');
@@ -546,14 +527,6 @@ export default {
 
         const deltas = requested.map(({ itemId, quantity }) => ({ itemId, amount: isGive ? quantity : -quantity }));
 
-        
-        
-        
-        
-        
-        
-        
-        
         if (isGive) {
           const blocked = requested.find(({ itemId }) => isOwnerOnlyItem(getItem(itemId)));
           if (blocked && !isOwnerId(interaction.user.id)) {

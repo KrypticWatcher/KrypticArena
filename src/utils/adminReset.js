@@ -71,6 +71,15 @@ export const resetUserCasinoStats = db.transaction((guildId, userId) => {
   deleteGameStatsFor(guildId, userId, CASINO_GAMES);
 });
 
+const stmtDeleteConstructionProjectsForUser = db.prepare('DELETE FROM construction_projects WHERE user_id = ?');
+const stmtDeleteConstructionXpForUser = db.prepare("DELETE FROM skill_xp WHERE guild_id = ? AND user_id = ? AND skill_id = 'construction'");
+
+export const resetUserConstruction = db.transaction((guildId, userId) => {
+  guildId = GLOBAL_ID;
+  stmtDeleteConstructionProjectsForUser.run(userId);
+  stmtDeleteConstructionXpForUser.run(guildId, userId);
+});
+
 export const resetUserStarterClaim = db.transaction((guildId, userId) => {
   guildId = GLOBAL_ID;
   ensureUser(guildId, userId);

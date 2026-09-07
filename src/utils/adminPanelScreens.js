@@ -282,9 +282,7 @@ if (profile.onAdventure) {
 export async function buildGearPanel(guildId, targetUser, setName = 'arena') {
   const equipped = getEquipment(guildId, targetUser.id, setName);
   const allSets = getAllEquipmentSets(guildId, targetUser.id);
-  
-  
-  
+
   const themed = hasFlag(targetUser.id, 'T6');
   const png = await renderGearImage(targetUser.username, equipped, { themed, setLabel: SET_LABELS[setName], allSets });
   const embed = buildPanelEmbed({
@@ -372,6 +370,7 @@ export function buildResetPanel(targetUser) {
     { targetUserId: targetUser.id, screen: 'reset-arena', action: 'ask', label: '⚔️ Arena Stats' },
     { targetUserId: targetUser.id, screen: 'reset-casino', action: 'ask', label: '🎰 Casino Stats' },
     { targetUserId: targetUser.id, screen: 'reset-starter', action: 'ask', label: '🎁 Starter Claim' },
+    { targetUserId: targetUser.id, screen: 'reset-construction', action: 'ask', label: '🏗️ Construction (migration)' },
     { targetUserId: targetUser.id, screen: 'reset-everything', action: 'ask', label: '☢️ Everything', style: ButtonStyle.Danger },
     backButton(targetUser.id, 'top'),
   ];

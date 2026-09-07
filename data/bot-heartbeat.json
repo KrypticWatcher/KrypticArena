@@ -1,8 +1,8 @@
 {
-  "state": "online",
-  "updatedAt": 1788809233590,
+  "state": "offline",
+  "updatedAt": 1788809313086,
   "pid": 18904,
   "botTag": "Kryptic Arena#5979",
   "guildCount": 2,
-  "ping": 58
+  "ping": 57
 }

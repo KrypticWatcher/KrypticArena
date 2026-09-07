@@ -21,20 +21,21 @@ export const ADMIN_ACTIONS = {
   RESET_ARENA_STATS: 'reset.arena_stats',
   RESET_CASINO_STATS: 'reset.casino_stats',
   RESET_STARTER_CLAIM: 'reset.starter_claim',
+  RESET_CONSTRUCTION: 'reset.construction',
   RESET_EVERYTHING: 'reset.everything',
   SETTINGS_CHANGE: 'settings.change',
-  
+
   BITFIELD_GRANT: 'bitfield.grant',
   BITFIELD_REVOKE: 'bitfield.revoke',
   BLACKLIST_ADD: 'blacklist.add',
   BLACKLIST_REMOVE: 'blacklist.remove',
   HADES_GRANT: 'hades.grant',
   OWNER_RESET_ECONOMY: 'owner.reset_economy',
-  
+
   SYSTEM_SHUTDOWN: 'system.shutdown',
   SYSTEM_RESTART: 'system.restart',
   SYSTEM_DEPLOY: 'system.deploy',
-  
+
   NAMEFILTER_ADD: 'namefilter.add',
   NAMEFILTER_REMOVE: 'namefilter.remove',
 };

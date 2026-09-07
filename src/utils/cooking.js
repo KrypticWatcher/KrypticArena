@@ -2,7 +2,7 @@ import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
 import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity } from './construction.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
@@ -14,7 +14,7 @@ export const COOKING_TRIP_TYPE = 'cooking';
 
 const TIER_LEVELS = [1, 5, 10, 20, 35, 45, 55, 65, 75, 85, 92];
 const FULL_TRIP_MINUTES = 30;
-const MIN_TRIP_SECONDS = 30;
+const MIN_TRIP_SECONDS = 10;
 const MAX_YIELD_BY_TIER = { 1: 100, 5: 95, 10: 90, 20: 85, 35: 78, 45: 70, 55: 62, 65: 55, 75: 48, 85: 42, 92: 38 };
 
 const XP_PER_UNIT_BY_TIER = { 1: 4, 5: 5, 10: 6, 20: 8, 35: 12, 45: 15, 55: 18, 65: 21, 75: 25, 85: 29, 92: 33 };
@@ -110,7 +110,10 @@ export async function startCookingTrip(guildId, userId, channelId, fallbackName,
   }
 
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-  const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeCookingTripSeconds(tier, quantity);
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'cooking');
+  const tripSeconds = hasInstantTrips(guildId, userId)
+    ? 30
+    : applyConstructionTripTimeReduction(computeCookingTripSeconds(tier, quantity), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `cooking:${tier}`;

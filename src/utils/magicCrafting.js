@@ -2,7 +2,7 @@ import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
 import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity } from './construction.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
@@ -14,7 +14,7 @@ import { recordLastTripSettings, skillRepeatTripRow } from './lastTripSettings.j
 export const MAGIC_CRAFTING_TRIP_TYPE = 'magic_crafting';
 
 const FULL_TRIP_MINUTES = 30;
-const MIN_TRIP_SECONDS = 30;
+const MIN_TRIP_SECONDS = 10;
 
 const MAX_YIELD = 100;
 
@@ -148,7 +148,10 @@ export async function startMagicCraftingTrip(guildId, userId, channelId, fallbac
   if (missing.length > 0) throw new EconomyError(`You're missing: ${missing.join(', ')}.`);
 
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-  const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeMagicCraftingTripSeconds(quantity);
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'crafting');
+  const tripSeconds = hasInstantTrips(guildId, userId)
+    ? 30
+    : applyConstructionTripTimeReduction(computeMagicCraftingTripSeconds(quantity), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `magic_crafting:${productId}`;

@@ -2,7 +2,7 @@ import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
 import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity } from './construction.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
@@ -14,7 +14,7 @@ import { recordLastTripSettings, skillRepeatTripRow } from './lastTripSettings.j
 export const HERBALISM_TRIP_TYPE = 'herbalism';
 
 const FULL_TRIP_MINUTES = 30;
-const MIN_TRIP_SECONDS = 30;
+const MIN_TRIP_SECONDS = 10;
 const MAX_YIELD_BY_TIER = { 1: 100, 5: 95, 10: 90, 20: 85, 35: 78, 45: 70, 55: 62, 65: 55, 75: 48, 85: 42, 92: 38 };
 
 const XP_PER_UNIT_BY_TIER = { 1: 4, 5: 5, 10: 6, 20: 8, 35: 12, 45: 15, 55: 18, 65: 21, 75: 25, 85: 29, 92: 33 };
@@ -103,7 +103,10 @@ export async function startHerbalismTrip(guildId, userId, channelId, fallbackNam
   if (ownedVials < vialCost) throw new EconomyError(`You need ${vialCost}x Vial of Water (10 coins each from the Arena Store) — you have ${ownedVials}.`);
 
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-  const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeHerbalismTripSeconds(tier, quantity);
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'herbalism');
+  const tripSeconds = hasInstantTrips(guildId, userId)
+    ? 30
+    : applyConstructionTripTimeReduction(computeHerbalismTripSeconds(tier, quantity), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `herbalism:${tier}`;

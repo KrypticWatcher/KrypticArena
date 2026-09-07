@@ -113,7 +113,7 @@ const KILLS_PER_TRIP_BY_TIER = { 1: 48, 5: 45, 10: 42, 20: 38, 35: 35, 45: 32, 5
 
 const BASE_XP_PER_KILL_BY_TIER = { 1: 8.8, 5: 12, 10: 16, 20: 24, 35: 36, 45: 44, 55: 52, 65: 60, 75: 68, 85: 79, 92: 88.9 };
 const FULL_TRIP_MINUTES = 30;
-const MIN_TRIP_SECONDS = 30;
+const MIN_TRIP_SECONDS = 10;
 
 export function getMaxQuantityForTier(tier) {
   return KILLS_PER_TRIP_BY_TIER[tier] ?? 30;

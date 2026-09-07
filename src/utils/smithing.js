@@ -2,7 +2,7 @@ import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
 import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity } from './construction.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
@@ -17,13 +17,17 @@ export const SMITH_TRIP_TYPE = 'smith';
 const TIER_LEVELS = [1, 5, 10, 20, 35, 45, 55, 65, 75, 85, 92];
 const ORE_TO_BAR_RATIO = { 1: 1, 5: 2, 10: 1, 20: 2, 35: 1, 45: 2, 55: 2, 65: 3, 75: 3, 85: 3, 92: 4 };
 const FULL_TRIP_MINUTES = 30;
-const MIN_TRIP_SECONDS = 30;
+const MIN_TRIP_SECONDS = 10;
 const MAX_BAR_YIELD_BY_TIER = { 1: 40, 5: 38, 10: 36, 20: 33, 35: 30, 45: 27, 55: 24, 65: 21, 75: 18, 85: 15, 92: 13 };
+
+const FORGE_QUANTITY_MULTIPLIER = 1.5;
+const FORGE_SPEED_MULTIPLIER = 0.7;
 
 const XP_PER_UNIT_BY_TIER = { 1: 8, 5: 11, 10: 14, 20: 20, 35: 31, 45: 38, 55: 46, 65: 54, 75: 64, 85: 77, 92: 89 };
 
-export function getMaxSmeltQuantity(tier) {
-  return MAX_BAR_YIELD_BY_TIER[tier] ?? 20;
+export function getMaxSmeltQuantity(tier, useForge = false) {
+  const base = MAX_BAR_YIELD_BY_TIER[tier] ?? 20;
+  return useForge ? Math.round(base * FORGE_QUANTITY_MULTIPLIER) : base;
 }
 
 export function getAffordableSmeltQuantity(guildId, userId, tier, requestedBarQuantity) {
@@ -36,9 +40,10 @@ export function getAffordableSmeltQuantity(guildId, userId, tier, requestedBarQu
   const affordableBars = effectiveRatio > 0 ? Math.floor(ownedOre / effectiveRatio) : Math.floor(ownedOre / ratio);
   return Math.max(0, Math.min(requestedBarQuantity, affordableBars));
 }
-export function computeSmeltTripSeconds(tier, barQuantity) {
-  const maxQty = getMaxSmeltQuantity(tier);
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / maxQty;
+export function computeSmeltTripSeconds(tier, barQuantity, useForge = false) {
+
+  const normalMaxQty = getMaxSmeltQuantity(tier, false);
+  const secondsPerUnit = ((FULL_TRIP_MINUTES * 60) / normalMaxQty) * (useForge ? FORGE_SPEED_MULTIPLIER : 1);
   return Math.max(MIN_TRIP_SECONDS, Math.round(barQuantity * secondsPerUnit));
 }
 
@@ -52,19 +57,21 @@ function getBar(tier) {
 export function describeSmithingActiveTrip(activeMobId, timestamp) {
   if (!activeMobId) return null;
   if (activeMobId.startsWith('smelt:')) {
-    const tier = Number(activeMobId.split(':')[1]);
-    const bar = getBar(tier);
-    return `🔥 Out smelting **${bar ? bar.name : 'bars'}**. Back ${timestamp}.`;
+    const [, tierStr, forgeFlag] = activeMobId.split(':');
+    const bar = getBar(Number(tierStr));
+    const forgeNote = forgeFlag === 'forge' ? ' at the Master Forge' : '';
+    return `🔥 Out smelting${forgeNote} **${bar ? bar.name : 'bars'}**. Back ${timestamp}.`;
   }
   if (activeMobId.startsWith('smith:')) {
-    const productId = Number(activeMobId.split(':')[1]);
-    const product = getItem(productId);
-    return `🔨 Out smithing **${product ? product.name : 'gear'}**. Back ${timestamp}.`;
+    const [, productIdStr, forgeFlag] = activeMobId.split(':');
+    const product = getItem(Number(productIdStr));
+    const forgeNote = forgeFlag === 'forge' ? ' at the Master Forge' : '';
+    return `🔨 Out smithing${forgeNote} **${product ? product.name : 'gear'}**. Back ${timestamp}.`;
   }
   return null;
 }
 
-export async function startSmeltTrip(guildId, userId, channelId, fallbackName, tier, barQuantity) {
+export async function startSmeltTrip(guildId, userId, channelId, fallbackName, tier, barQuantity, useForge = false) {
   guildId = GLOBAL_ID;
   if (isGladiatorAdventuring(guildId, userId)) {
     const profile = getGladiatorProfile(guildId, userId, fallbackName);
@@ -76,6 +83,10 @@ export async function startSmeltTrip(guildId, userId, channelId, fallbackName, t
     throw new EconomyError("Your Gladiator's last trip hasn't finished resolving yet — try again in a moment.");
   }
 
+  if (useForge && getProjectCurrentTier(userId, 'forge') < 1) {
+    throw new EconomyError('You need to build the Master Forge (Tier 1+) to use Forge Mode — see /building.');
+  }
+
   const ore = getOre(tier);
   const bar = getBar(tier);
   if (!ore || !bar) throw new EconomyError('Invalid tier.');
@@ -83,7 +94,7 @@ export async function startSmeltTrip(guildId, userId, channelId, fallbackName, t
   const currentLevel = getSkillLevel(guildId, userId, 'smithing');
   if (currentLevel < tier) throw new EconomyError(`You need Smithing level ${tier} for this bar [You are Level ${currentLevel}].`);
 
-  const maxQty = getMaxSmeltQuantity(tier);
+  const maxQty = getMaxSmeltQuantity(tier, useForge);
 
   if (barQuantity == null) barQuantity = maxQty;
   if (!Number.isInteger(barQuantity) || barQuantity < 1 || barQuantity > maxQty) {
@@ -99,14 +110,17 @@ export async function startSmeltTrip(guildId, userId, channelId, fallbackName, t
   }
 
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-  const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeSmeltTripSeconds(tier, barQuantity);
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'smithing');
+  const tripSeconds = hasInstantTrips(guildId, userId)
+    ? 30
+    : applyConstructionTripTimeReduction(computeSmeltTripSeconds(tier, barQuantity, useForge), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
-  const syntheticId = `smelt:${tier}`;
+  const syntheticId = useForge ? `smelt:${tier}:forge` : `smelt:${tier}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, barQuantity, guildId, userId);
-  recordLastTripSettings(userId, SMELT_TRIP_TYPE, { tier, barQuantity });
+  recordLastTripSettings(userId, SMELT_TRIP_TYPE, { tier, barQuantity, useForge });
 
   const BLACKSMITHS_HAMMER_ID = 41003;
   const BLACKSMITHS_HAMMER_PROC_PERCENT = 15;
@@ -131,7 +145,9 @@ export async function resolveDueSmelt(row) {
   const userId = row.user_id;
   const name = row.name;
   const channelId = row.adventure_channel_id;
-  const tier = Number(row.active_mob_id.split(':')[1]);
+  const [, tierStr, forgeFlag] = row.active_mob_id.split(':');
+  const tier = Number(tierStr);
+  const useForge = forgeFlag === 'forge';
   const barQuantity = row.slay_quantity;
 
   const bar = getBar(tier);
@@ -149,7 +165,7 @@ export async function resolveDueSmelt(row) {
     guildId, userId, BLACKSMITHS_HAMMER_ID, row.adventure_started_at, row.adventure_ends_at, BLACKSMITHS_HAMMER_FIND_PERCENT
   );
 
-  let text = `<@${userId}> **${displayName}** returns from smelting — **${barQuantity}x ${bar.name}**.`;
+  let text = `<@${userId}> **${displayName}** returns from smelting${useForge ? ' at the Master Forge' : ''} — **${barQuantity}x ${bar.name}**.`;
   if (foundHammer) text += `\n\n🔨 You found a **Blacksmith's Hammer**!`;
   text += `\n✨ **+${totalXp.toLocaleString('en-US')} Smithing XP**`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
@@ -197,8 +213,9 @@ export function getSmithProductsForTier(tier) {
 }
 
 const MAX_SMITH_YIELD_BY_TIER = { 1: 40, 5: 38, 10: 36, 20: 33, 35: 30, 45: 27, 55: 24, 65: 21, 75: 18, 85: 15, 92: 13 };
-export function getMaxSmithQuantity(tier) {
-  return MAX_SMITH_YIELD_BY_TIER[tier] ?? 20;
+export function getMaxSmithQuantity(tier, useForge = false) {
+  const base = MAX_SMITH_YIELD_BY_TIER[tier] ?? 20;
+  return useForge ? Math.round(base * FORGE_QUANTITY_MULTIPLIER) : base;
 }
 
 export function getAffordableSmithQuantity(guildId, userId, productId, requestedQuantity) {
@@ -213,13 +230,13 @@ export function getAffordableSmithQuantity(guildId, userId, productId, requested
   const affordable = effectiveBarCost > 0 ? Math.floor(ownedBars / effectiveBarCost) : Math.floor(ownedBars / barCost);
   return Math.max(0, Math.min(requestedQuantity, affordable));
 }
-export function computeSmithTripSeconds(tier, quantity) {
-  const maxQty = getMaxSmithQuantity(tier);
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / maxQty;
+export function computeSmithTripSeconds(tier, quantity, useForge = false) {
+  const normalMaxQty = getMaxSmithQuantity(tier, false);
+  const secondsPerUnit = ((FULL_TRIP_MINUTES * 60) / normalMaxQty) * (useForge ? FORGE_SPEED_MULTIPLIER : 1);
   return Math.max(MIN_TRIP_SECONDS, Math.round(quantity * secondsPerUnit));
 }
 
-export async function startSmithTrip(guildId, userId, channelId, fallbackName, productId, quantity) {
+export async function startSmithTrip(guildId, userId, channelId, fallbackName, productId, quantity, useForge = false) {
   guildId = GLOBAL_ID;
   if (isGladiatorAdventuring(guildId, userId)) {
     const profile = getGladiatorProfile(guildId, userId, fallbackName);
@@ -229,6 +246,10 @@ export async function startSmithTrip(guildId, userId, channelId, fallbackName, p
   }
   if (hasUnclaimedAdventure(guildId, userId)) {
     throw new EconomyError("Your Gladiator's last trip hasn't finished resolving yet — try again in a moment.");
+  }
+
+  if (useForge && getProjectCurrentTier(userId, 'forge') < 1) {
+    throw new EconomyError('You need to build the Master Forge (Tier 1+) to use Forge Mode — see /building.');
   }
 
   const product = getItem(productId);
@@ -246,7 +267,7 @@ export async function startSmithTrip(guildId, userId, channelId, fallbackName, p
     throw new EconomyError('You need a Hammer to Smith at all — buy one from the Arena Store.');
   }
 
-  const maxQty = getMaxSmithQuantity(tier);
+  const maxQty = getMaxSmithQuantity(tier, useForge);
   const constructionReductionPercent = getConstructionCostReductionPercent(userId, 'smithing');
   const ownedBars = getOwnedQuantity(guildId, userId, bar.id);
 
@@ -268,14 +289,17 @@ export async function startSmithTrip(guildId, userId, channelId, fallbackName, p
   }
 
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-  const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeSmithTripSeconds(tier, quantity);
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'smithing');
+  const tripSeconds = hasInstantTrips(guildId, userId)
+    ? 30
+    : applyConstructionTripTimeReduction(computeSmithTripSeconds(tier, quantity, useForge), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
-  const syntheticId = `smith:${productId}`;
+  const syntheticId = useForge ? `smith:${productId}:forge` : `smith:${productId}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-  recordLastTripSettings(userId, SMITH_TRIP_TYPE, { productId, quantity });
+  recordLastTripSettings(userId, SMITH_TRIP_TYPE, { productId, quantity, useForge });
 
   const BLACKSMITHS_HAMMER_ID = 41003;
   const BLACKSMITHS_HAMMER_PROC_PERCENT = 15;
@@ -300,7 +324,9 @@ export async function resolveDueSmith(row) {
   const userId = row.user_id;
   const name = row.name;
   const channelId = row.adventure_channel_id;
-  const productId = Number(row.active_mob_id.split(':')[1]);
+  const [, productIdStr, forgeFlag] = row.active_mob_id.split(':');
+  const productId = Number(productIdStr);
+  const useForge = forgeFlag === 'forge';
   const quantity = row.slay_quantity;
 
   const product = getItem(productId);
@@ -320,7 +346,7 @@ export async function resolveDueSmith(row) {
     guildId, userId, BLACKSMITHS_HAMMER_ID, row.adventure_started_at, row.adventure_ends_at, BLACKSMITHS_HAMMER_FIND_PERCENT
   );
 
-  let text = `<@${userId}> **${displayName}** returns from smithing — **${quantity}x ${product.name}**.`;
+  let text = `<@${userId}> **${displayName}** returns from smithing${useForge ? ' at the Master Forge' : ''} — **${quantity}x ${product.name}**.`;
   if (foundHammer) text += `\n\n🔨 You found a **Blacksmith's Hammer**!`;
   text += `\n✨ **+${totalXp.toLocaleString('en-US')} Smithing XP**`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
