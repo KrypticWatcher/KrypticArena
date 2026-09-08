@@ -1,8 +1,8 @@
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
@@ -19,8 +19,12 @@ const MAX_YIELD_BY_TIER = { 1: 100, 5: 95, 10: 90, 20: 85, 35: 78, 45: 70, 55: 6
 
 const XP_PER_UNIT_BY_TIER = { 1: 4, 5: 5, 10: 6, 20: 8, 35: 12, 45: 15, 55: 18, 65: 21, 75: 25, 85: 29, 92: 33 };
 
-export function getMaxCookingQuantity(tier) {
-  return MAX_YIELD_BY_TIER[tier] ?? 50;
+const BOOSTED_QUANTITY_MULTIPLIER = 1.5;
+const BOOSTED_SPEED_MULTIPLIER = 0.7;
+
+export function getMaxCookingQuantity(tier, useBoostedMode = false) {
+  const base = MAX_YIELD_BY_TIER[tier] ?? 50;
+  return useBoostedMode ? Math.round(base * BOOSTED_QUANTITY_MULTIPLIER) : base;
 }
 
 export function getAffordableCookingQuantity(guildId, userId, tier, requestedQuantity) {
@@ -33,9 +37,9 @@ export function getAffordableCookingQuantity(guildId, userId, tier, requestedQua
   const affordable = costMultiplier > 0 ? Math.floor(owned / costMultiplier) : owned;
   return Math.max(0, Math.min(requestedQuantity, affordable));
 }
-export function computeCookingTripSeconds(tier, quantity) {
-  const maxQty = getMaxCookingQuantity(tier);
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / maxQty;
+export function computeCookingTripSeconds(tier, quantity, useBoostedMode = false) {
+  const normalMaxQty = getMaxCookingQuantity(tier, false);
+  const secondsPerUnit = ((FULL_TRIP_MINUTES * 60) / normalMaxQty) * (useBoostedMode ? BOOSTED_SPEED_MULTIPLIER : 1);
   return Math.max(MIN_TRIP_SECONDS, Math.round(quantity * secondsPerUnit));
 }
 
@@ -48,9 +52,11 @@ function getCookedFish(tier) {
 
 export function describeCookingActiveTrip(activeMobId, timestamp) {
   if (!activeMobId || !activeMobId.startsWith('cooking:')) return null;
-  const tier = Number(activeMobId.split(':')[1]);
+  const [, tierStr, boostedFlag] = activeMobId.split(':');
+  const tier = Number(tierStr);
   const rawFish = getRawFish(tier);
-  return `🍳 Out cooking **${rawFish ? rawFish.name : 'fish'}**. Back ${timestamp}.`;
+  const boostedNote = boostedFlag === 'boosted' ? ' at the Grand Kitchen' : '';
+  return `🍳 Out cooking${boostedNote} **${rawFish ? rawFish.name : 'fish'}**. Back ${timestamp}.`;
 }
 
 export function computeBurnChancePercent(fishTierLevel, cookingLevel) {
@@ -68,7 +74,7 @@ export function computeBurnChancePercent(fishTierLevel, cookingLevel) {
   return Math.max(reduced, floor);
 }
 
-export async function startCookingTrip(guildId, userId, channelId, fallbackName, tier, quantity) {
+export async function startCookingTrip(guildId, userId, channelId, fallbackName, tier, quantity, useBoostedMode = false) {
   guildId = GLOBAL_ID;
   if (isGladiatorAdventuring(guildId, userId)) {
     const profile = getGladiatorProfile(guildId, userId, fallbackName);
@@ -80,6 +86,10 @@ export async function startCookingTrip(guildId, userId, channelId, fallbackName,
     throw new EconomyError("Your Gladiator's last trip hasn't finished resolving yet — try again in a moment.");
   }
 
+  if (useBoostedMode && getProjectCurrentTier(userId, 'kitchen') < 1) {
+    throw new EconomyError('You need to build the Grand Kitchen (Tier 1+) to use Boosted Mode — see /building.');
+  }
+
   const rawFish = getRawFish(tier);
   if (!rawFish) throw new EconomyError('Invalid tier.');
 
@@ -88,7 +98,7 @@ export async function startCookingTrip(guildId, userId, channelId, fallbackName,
     throw new EconomyError(`You need Cooking level ${tier} for this fish [You are Level ${currentLevel}].`);
   }
 
-  const maxQty = getMaxCookingQuantity(tier);
+  const maxQty = getMaxCookingQuantity(tier, useBoostedMode);
   const constructionReductionPercent = getConstructionCostReductionPercent(userId, 'cooking');
   const owned = getOwnedQuantity(guildId, userId, rawFish.id);
 
@@ -109,24 +119,36 @@ export async function startCookingTrip(guildId, userId, channelId, fallbackName,
     throw new EconomyError(`You need ${actualCost}x ${rawFish.name} to cook that many — you have ${owned}.`);
   }
 
+  let matchingLog = null;
+  if (useBoostedMode) {
+    matchingLog = ITEMS.find((i) => i.category === 'log' && i.tier === tier);
+    if (!matchingLog) throw new EconomyError(`No matching Tier ${tier} Logs exist — can't use the Grand Kitchen for this fish.`);
+    const ownedLogs = getOwnedQuantity(guildId, userId, matchingLog.id);
+    if (ownedLogs < quantity) {
+      throw new EconomyError(`The Grand Kitchen needs ${quantity}x ${matchingLog.name} to cook that many — you have ${ownedLogs}.`);
+    }
+  }
+
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'cooking');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
-    : applyConstructionTripTimeReduction(computeCookingTripSeconds(tier, quantity), constructionTripTimeReductionPercent);
+    ? INSTANT_TRIP_SECONDS
+    : applyConstructionTripTimeReduction(computeCookingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
-  const syntheticId = `cooking:${tier}`;
+  const syntheticId = useBoostedMode ? `cooking:${tier}:boosted` : `cooking:${tier}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-  recordLastTripSettings(userId, COOKING_TRIP_TYPE, { tier, quantity });
+  recordLastTripSettings(userId, COOKING_TRIP_TYPE, { tier, quantity, useBoostedMode });
 
   addItemToInventory(guildId, userId, rawFish.id, -actualCost);
+  if (useBoostedMode) addItemToInventory(guildId, userId, matchingLog.id, -quantity);
 
   const displayName = formatGladiatorDisplayName(guildId, userId, gladiatorRow.name);
   const timestamp = `<t:${Math.floor(endsAt / 1000)}:R>`;
-  return { text: `**${displayName}** heads off to cook ${quantity}x **${rawFish.name}**. Back ${timestamp}.`, endsAt };
+  const logNote = useBoostedMode ? ` (using ${quantity}x ${matchingLog.name})` : '';
+  return { text: `**${displayName}** heads off to cook ${quantity}x **${rawFish.name}**${logNote}. Back ${timestamp}.`, endsAt };
 }
 
 export async function resolveDueCooking(row) {
@@ -134,7 +156,9 @@ export async function resolveDueCooking(row) {
   const userId = row.user_id;
   const name = row.name;
   const channelId = row.adventure_channel_id;
-  const tier = Number(row.active_mob_id.split(':')[1]);
+  const [, tierStr, boostedFlag] = row.active_mob_id.split(':');
+  const tier = Number(tierStr);
+  const useBoostedMode = boostedFlag === 'boosted';
   const quantity = row.slay_quantity;
 
   const cookedFish = getCookedFish(tier);
@@ -159,7 +183,7 @@ export async function resolveDueCooking(row) {
   let xpResult = null;
   if (totalXp > 0) xpResult = addSkillXp(guildId, userId, 'cooking', totalXp);
 
-  let text = `<@${userId}> **${displayName}** returns from cooking — **${cooked}x ${cookedFish.name}**`;
+  let text = `<@${userId}> **${displayName}** returns from cooking${useBoostedMode ? ' at the Grand Kitchen' : ''} — **${cooked}x ${cookedFish.name}**`;
   if (burnt > 0) text += ` (${burnt} burnt)`;
   text += '.';
   if (xpResult) {

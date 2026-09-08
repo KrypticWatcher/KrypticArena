@@ -1,7 +1,7 @@
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
@@ -105,7 +105,7 @@ export async function startTanningTrip(guildId, userId, channelId, fallbackName,
   }
 
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
-  const tripSeconds = hasInstantTrips(guildId, userId) ? 30 : computeTanningTripSeconds(tier, quantity);
+  const tripSeconds = hasInstantTrips(guildId, userId) ? INSTANT_TRIP_SECONDS : computeTanningTripSeconds(tier, quantity);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `tanning:${tier}`;

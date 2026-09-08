@@ -1,8 +1,8 @@
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
@@ -23,8 +23,12 @@ const NEEDLE_BREAK_CHANCE_PERCENT = 3;
 const LARGE_SLOTS = new Set(['chest', 'legs']);
 const THREAD_PER_PIECE = { small: 2, large: 4 };
 
-export function getMaxCraftingQuantity(tier) {
-  return MAX_YIELD_BY_TIER[tier] ?? 50;
+const BOOSTED_QUANTITY_MULTIPLIER = 1.5;
+const BOOSTED_SPEED_MULTIPLIER = 0.7;
+
+export function getMaxCraftingQuantity(tier, useBoostedMode = false) {
+  const base = MAX_YIELD_BY_TIER[tier] ?? 50;
+  return useBoostedMode ? Math.round(base * BOOSTED_QUANTITY_MULTIPLIER) : base;
 }
 
 export function getAffordableCraftingQuantity(guildId, userId, productId, requestedQuantity) {
@@ -44,9 +48,9 @@ export function getAffordableCraftingQuantity(guildId, userId, productId, reques
   const affordableByThread = effectiveThreadCost > 0 ? Math.floor(ownedThread / effectiveThreadCost) : Math.floor(ownedThread / threadCost);
   return Math.max(0, Math.min(requestedQuantity, affordableByHides, affordableByThread));
 }
-export function computeCraftingTripSeconds(tier, quantity) {
-  const maxQty = getMaxCraftingQuantity(tier);
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / maxQty;
+export function computeCraftingTripSeconds(tier, quantity, useBoostedMode = false) {
+  const normalMaxQty = getMaxCraftingQuantity(tier, false);
+  const secondsPerUnit = ((FULL_TRIP_MINUTES * 60) / normalMaxQty) * (useBoostedMode ? BOOSTED_SPEED_MULTIPLIER : 1);
   return Math.max(MIN_TRIP_SECONDS, Math.round(quantity * secondsPerUnit));
 }
 
@@ -62,9 +66,11 @@ function getThread() {
 
 export function describeCraftingActiveTrip(activeMobId, timestamp) {
   if (!activeMobId || !activeMobId.startsWith('crafting:')) return null;
-  const productId = Number(activeMobId.split(':')[1]);
+  const [, productIdStr, boostedFlag] = activeMobId.split(':');
+  const productId = Number(productIdStr);
   const product = getItem(productId);
-  return `🧵 Out crafting **${product ? product.name : 'gear'}**. Back ${timestamp}.`;
+  const boostedNote = boostedFlag === 'boosted' ? " at the Crafter's Workshop" : '';
+  return `🧵 Out crafting${boostedNote} **${product ? product.name : 'gear'}**. Back ${timestamp}.`;
 }
 
 function threadCostForProduct(product) {
@@ -77,7 +83,7 @@ export function getCraftingProductsForTier(tier) {
   return rangedCraft.map((p) => ({ ...p, threadCost: threadCostForProduct(p) }));
 }
 
-export async function startCraftingTrip(guildId, userId, channelId, fallbackName, productId, quantity) {
+export async function startCraftingTrip(guildId, userId, channelId, fallbackName, productId, quantity, useBoostedMode = false) {
   guildId = GLOBAL_ID;
   if (isGladiatorAdventuring(guildId, userId)) {
     const profile = getGladiatorProfile(guildId, userId, fallbackName);
@@ -89,6 +95,10 @@ export async function startCraftingTrip(guildId, userId, channelId, fallbackName
     throw new EconomyError("Your Gladiator's last trip hasn't finished resolving yet — try again in a moment.");
   }
 
+  if (useBoostedMode && getProjectCurrentTier(userId, 'workshop') < 1) {
+    throw new EconomyError("You need to build the Crafter's Workshop (Tier 1+) to use Boosted Mode — see /building.");
+  }
+
   const product = getItem(productId);
   if (!product) throw new EconomyError('Invalid product.');
   const tier = product.tier;
@@ -96,7 +106,7 @@ export async function startCraftingTrip(guildId, userId, channelId, fallbackName
   const currentLevel = getSkillLevel(guildId, userId, 'crafting');
   if (currentLevel < tier) throw new EconomyError(`You need Crafting level ${tier} [You are Level ${currentLevel}].`);
 
-  const maxQty = getMaxCraftingQuantity(tier);
+  const maxQty = getMaxCraftingQuantity(tier, useBoostedMode);
   const threadCost = threadCostForProduct(product);
   const hide = getTannedHide(tier);
   const needle = getNeedle();
@@ -134,15 +144,15 @@ export async function startCraftingTrip(guildId, userId, channelId, fallbackName
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'crafting');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
-    : applyConstructionTripTimeReduction(computeCraftingTripSeconds(tier, quantity), constructionTripTimeReductionPercent);
+    ? INSTANT_TRIP_SECONDS
+    : applyConstructionTripTimeReduction(computeCraftingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
-  const syntheticId = `crafting:${productId}`;
+  const syntheticId = useBoostedMode ? `crafting:${productId}:boosted` : `crafting:${productId}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-  recordLastTripSettings(userId, CRAFTING_TRIP_TYPE, { productId, quantity });
+  recordLastTripSettings(userId, CRAFTING_TRIP_TYPE, { productId, quantity, useBoostedMode });
 
   addItemToInventory(guildId, userId, hide.id, -hidesNeeded);
   addItemToInventory(guildId, userId, thread.id, -threadNeeded);
@@ -157,7 +167,9 @@ export async function resolveDueCrafting(row) {
   const userId = row.user_id;
   const name = row.name;
   const channelId = row.adventure_channel_id;
-  const productId = Number(row.active_mob_id.split(':')[1]);
+  const [, productIdStr, boostedFlag] = row.active_mob_id.split(':');
+  const productId = Number(productIdStr);
+  const useBoostedMode = boostedFlag === 'boosted';
   const quantity = row.slay_quantity;
 
   const product = getItem(productId);
@@ -196,7 +208,7 @@ export async function resolveDueCrafting(row) {
   const totalXp = xpPerUnit * quantity;
   const xpResult = addSkillXp(guildId, userId, 'crafting', totalXp);
 
-  let text = `<@${userId}> **${displayName}** returns from crafting — **${totalYield}x ${product.name}**${bonusPieces > 0 ? ` (${bonusPieces} bonus from Golden Needle)` : ''}.`;
+  let text = `<@${userId}> **${displayName}** returns from crafting${useBoostedMode ? " at the Crafter's Workshop" : ''} — **${totalYield}x ${product.name}**${bonusPieces > 0 ? ` (${bonusPieces} bonus from Golden Needle)` : ''}.`;
   if (needleBroke) text += `\n🪡 Your Needle broke — you'll need a new one for your next trip.`;
   if (foundGoldenNeedle) text += `\n\n🪡 You found a **Golden Needle**!`;
   text += `\n✨ **+${totalXp.toLocaleString('en-US')} Crafting XP**`;

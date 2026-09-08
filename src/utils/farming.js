@@ -1,7 +1,7 @@
 import { GLOBAL_ID } from './globalId.js';
 import db from '../database.js';
 import { ITEMS, getItem } from '../data/items.js';
-import { getSkillLevel, addSkillXp } from './skills.js';
+import { getSkillLevel, addSkillXp, formatOutfitBonusNote } from './skills.js';
 import {
   ensureGladiator,
   isGladiatorAdventuring,
@@ -18,7 +18,8 @@ import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
-import { getConstructionYieldBoostPercent, applyConstructionYieldBoost, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
+import { getConstructionYieldBoostPercent, applyConstructionYieldBoost, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
+import { rollSkillingOutfitFind } from './specialToolFinds.js';
 
 const PATCH_TYPES = ['herb', 'tree', 'fruit'];
 
@@ -85,10 +86,11 @@ function getGrownItem(seed, patchType) {
   return null;
 }
 
-function computeGrowthMs(seed, patchType, hasMasterCompost, constructionTripTimeReductionPercent) {
+function computeGrowthMs(seed, patchType, hasMasterCompost, constructionTripTimeReductionPercent, isGreenhouse = false) {
   const baseGrowthMs = patchType === 'tree' ? treeGrowthMs(seed.tier) : GROWTH_MS[patchType];
   const compostAdjusted = hasMasterCompost ? Math.round(baseGrowthMs * 0.75) : baseGrowthMs;
-  return applyConstructionTripTimeReduction(compostAdjusted, constructionTripTimeReductionPercent);
+  const greenhouseAdjusted = isGreenhouse ? Math.round(compostAdjusted / GREENHOUSE_GROWTH_MULTIPLIER) : compostAdjusted;
+  return applyConstructionTripTimeReduction(greenhouseAdjusted, constructionTripTimeReductionPercent);
 }
 
 function writeFarmingTrip(guildId, userId, endsAt, channelId, mode, tripData) {
@@ -270,14 +272,18 @@ export async function startFarmingHarvest(guildId, userId, channelId, fallbackNa
 }
 
 function harvestOnePatch(guildId, userId, patchType, patchIndex, alreadyHasCompost) {
+  const isGreenhouse = patchType.startsWith('greenhouse_');
+  const baseType = isGreenhouse ? patchType.slice('greenhouse_'.length) : patchType;
+
   const row = getPatchRow(userId, patchType, patchIndex);
   const seed = getItem(row.seed_item_id);
-  const grown = getGrownItem(seed, patchType);
+  const grown = getGrownItem(seed, baseType);
   stmtClearPatch.run(userId, patchType, patchIndex);
 
   const hasSecateurs = getOwnedQuantity(guildId, userId, SECATEURS_ID) > 0;
-  const baseYieldAmount = patchType === 'herb' ? 3 + Math.round(seed.tier / 20) : patchType === 'fruit' ? 2 + Math.round(seed.tier / 25) : 1;
-  let yieldAmount = patchType === 'herb' && hasSecateurs ? baseYieldAmount * 2 : baseYieldAmount;
+  const baseYieldAmount = baseType === 'herb' ? 3 + Math.round(seed.tier / 20) : baseType === 'fruit' ? 2 + Math.round(seed.tier / 25) : 1;
+  let yieldAmount = baseType === 'herb' && hasSecateurs ? baseYieldAmount * 2 : baseYieldAmount;
+  if (isGreenhouse) yieldAmount = Math.round(yieldAmount * GREENHOUSE_YIELD_MULTIPLIER);
   const constructionBoostPercent = getConstructionYieldBoostPercent(userId, 'farming');
   yieldAmount = applyConstructionYieldBoost(yieldAmount, constructionBoostPercent);
   addItemToInventory(guildId, userId, grown.id, yieldAmount, 'farming');
@@ -287,7 +293,7 @@ function harvestOnePatch(guildId, userId, patchType, patchIndex, alreadyHasCompo
   const farmingXp = farmingXpPerYield * yieldAmount;
 
   let woodcuttingXp = 0;
-  if (patchType === 'tree') {
+  if (baseType === 'tree') {
     const woodcuttingXpPerLog = 2 + Math.round(seed.tier / 10);
     woodcuttingXp = woodcuttingXpPerLog * yieldAmount;
   }
@@ -305,14 +311,14 @@ function harvestOnePatch(guildId, userId, patchType, patchIndex, alreadyHasCompo
     patchType,
     patchIndex,
     yieldAmount,
-    doubledBySecateurs: patchType === 'herb' && hasSecateurs,
+    doubledBySecateurs: baseType === 'herb' && hasSecateurs,
     farmingXp,
     woodcuttingXp,
     foundMasterCompost,
   };
 }
 
-function buildHarvestSummary(userId, displayName, results) {
+function buildHarvestSummary(userId, displayName, results, foundOutfitPiece = null) {
   const resourceTally = new Map();
   let totalFarmingXp = 0;
   let totalWoodcuttingXp = 0;
@@ -330,7 +336,7 @@ function buildHarvestSummary(userId, displayName, results) {
 
   const farmingResult = totalFarmingXp > 0 ? addSkillXp(GLOBAL_ID, userId, 'farming', totalFarmingXp) : null;
   if (farmingResult) {
-    content += `\n✨ **+${totalFarmingXp.toLocaleString('en-US')} Farming XP**`;
+    content += `\n✨ **+${farmingResult.xpGained.toLocaleString('en-US')} Farming XP**${formatOutfitBonusNote(farmingResult.outfitBonusPercent)}`;
     if (farmingResult.leveledUp) content += ` — 🆙 **Level ${farmingResult.afterLevel}!**`;
 
     const farmingGladXp = awardGladiatorXpFromSkilling(GLOBAL_ID, userId, farmingResult.xpGained, displayName);
@@ -339,7 +345,7 @@ function buildHarvestSummary(userId, displayName, results) {
 
   const wcResult = totalWoodcuttingXp > 0 ? addSkillXp(GLOBAL_ID, userId, 'woodcutting', totalWoodcuttingXp) : null;
   if (wcResult) {
-    content += `\n✨ **+${totalWoodcuttingXp.toLocaleString('en-US')} Woodcutting XP**`;
+    content += `\n✨ **+${wcResult.xpGained.toLocaleString('en-US')} Woodcutting XP**${formatOutfitBonusNote(wcResult.outfitBonusPercent)}`;
     if (wcResult.leveledUp) content += ` — 🆙 **Woodcutting Level ${wcResult.afterLevel}!**`;
 
     const wcGladXp = awardGladiatorXpFromSkilling(GLOBAL_ID, userId, wcResult.xpGained, displayName);
@@ -347,6 +353,7 @@ function buildHarvestSummary(userId, displayName, results) {
   }
 
   if (foundMasterCompost) content += `\n\n🌱 You found a **Master Compost**!`;
+  if (foundOutfitPiece) content += `\n\n🌾 You found the **${foundOutfitPiece.name}**!`;
 
   return content;
 }
@@ -370,7 +377,8 @@ export async function resolveDueFarmingHarvest(row) {
 
   endGladiatorAdventure(guildId, userId);
 
-  const content = buildHarvestSummary(userId, displayName, results);
+  const foundOutfitPiece = rollSkillingOutfitFind(guildId, userId, 'farming', row.adventure_started_at, row.adventure_ends_at);
+  const content = buildHarvestSummary(userId, displayName, results, foundOutfitPiece);
   return { guildId, userId, channelId, content, components: [], files: [] };
 }
 
@@ -576,4 +584,251 @@ export function seedChoicesForType(patchType) {
     const grownName = patchType === 'tree' ? `${baseName} Logs` : baseName;
     return ITEMS.some((g) => g.category === categoryByType[patchType] && g.name === grownName);
   });
+}
+
+// ===== Greenhouse: a separate patch system unlocked via Construction (Tier 1+).
+// Same QP-based patch counts as normal patches, but stored as separate DB rows
+// (patch_type prefixed 'greenhouse_') so a player's normal patches and Greenhouse
+// patches grow completely independently of each other. Grows 1.5x faster,
+// yields 1.3x more per harvest, and costs less Compost per patch than the
+// normal patch system.
+const GREENHOUSE_GROWTH_MULTIPLIER = 1.5;
+const GREENHOUSE_YIELD_MULTIPLIER = 1.3;
+const GREENHOUSE_COMPOST_DISCOUNT_PERCENT = 50;
+
+function ghType(patchType) {
+  return `greenhouse_${patchType}`;
+}
+
+function getGreenhouseCompostBags(patchType) {
+  return Math.max(1, Math.ceil(COMPOST_BAGS_PER_PLANT[patchType] * (1 - GREENHOUSE_COMPOST_DISCOUNT_PERCENT / 100)));
+}
+
+function writeGreenhouseTrip(guildId, userId, endsAt, channelId, mode, tripData) {
+  db.prepare(
+    'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, farming_trip_json = ? WHERE guild_id = ? AND user_id = ?'
+  ).run(Date.now(), endsAt, channelId, `greenhouse:${mode}`, JSON.stringify(tripData), guildId, userId);
+}
+
+export function describeGreenhouseActiveTrip(activeMobId, timestamp) {
+  if (!activeMobId || !activeMobId.startsWith('greenhouse:')) return null;
+  const mode = activeMobId.split(':')[1];
+  const label = mode === 'plant' ? 'planting' : 'harvesting';
+  return `🌿 Out ${label} Greenhouse patches. Back ${timestamp}.`;
+}
+
+export async function startGreenhousePlant(guildId, userId, channelId, fallbackName, seedsByType) {
+  guildId = GLOBAL_ID;
+  guardCanStartTrip(guildId, userId, fallbackName);
+
+  if (getProjectCurrentTier(userId, 'greenhouse') < 1) {
+    throw new EconomyError('You need to build the Grand Greenhouse (Tier 1+) to plant Greenhouse patches — see /building.');
+  }
+
+  const requestedTypes = PATCH_TYPES.filter((t) => seedsByType?.[t] != null);
+  if (requestedTypes.length === 0) throw new EconomyError('Pick at least one seed to plant (herb, tree, and/or fruit).');
+
+  const currentLevel = getSkillLevel(guildId, userId, 'farming');
+  const counts = getPatchCounts(getGladiatorQp(guildId, userId));
+  const compostBag = getCompostBagItem();
+
+  const plan = {};
+  for (const patchType of requestedTypes) {
+    const seed = getSeedForType(seedsByType[patchType]);
+    if (!seed) throw new EconomyError(`Invalid seed for your ${patchType} patch.`);
+    const grown = getGrownItem(seed, patchType);
+    if (!grown) throw new EconomyError(`That seed doesn't have a matching grown item registered for a ${patchType} patch.`);
+    if (currentLevel < seed.tier) throw new EconomyError(`You need Farming level ${seed.tier} to plant ${seed.name} (you're ${currentLevel}).`);
+
+    const maxPatches = counts[patchType] ?? 0;
+    if (!maxPatches) throw new EconomyError(`You don't have any ${patchType} patches unlocked yet.`);
+
+    const emptyIndexes = [];
+    for (let i = 1; i <= maxPatches; i++) {
+      const row = getPatchRow(userId, ghType(patchType), i);
+      if (!row?.seed_item_id) emptyIndexes.push(i);
+    }
+    if (emptyIndexes.length === 0) {
+      throw new EconomyError(`All your Greenhouse ${patchType} patches already have something growing — harvest them first.`);
+    }
+
+    const ownedSeeds = getOwnedQuantity(guildId, userId, seed.id);
+    if (ownedSeeds < 1) throw new EconomyError(`You don't own a ${seed.name}.`);
+
+    const bagsPerPatch = getGreenhouseCompostBags(patchType);
+    const ownedBags = getOwnedQuantity(guildId, userId, compostBag.id);
+    const maxByBags = Math.floor(ownedBags / bagsPerPatch);
+    if (maxByBags < 1) {
+      throw new EconomyError(`You need ${bagsPerPatch}x Compost Bag to plant a Greenhouse ${patchType} patch (100 coins each from the Arena Store) — you have ${ownedBags}.`);
+    }
+
+    const quantity = Math.min(emptyIndexes.length, ownedSeeds, maxByBags);
+    const patchIndexes = emptyIndexes.slice(0, quantity);
+    plan[patchType] = { seedItemId: seed.id, seedName: seed.name, patchIndexes, bagsUsed: bagsPerPatch * quantity };
+  }
+
+  for (const patchType of requestedTypes) {
+    const { seedItemId, patchIndexes, bagsUsed } = plan[patchType];
+    addItemToInventory(guildId, userId, seedItemId, -patchIndexes.length);
+    addItemToInventory(guildId, userId, compostBag.id, -bagsUsed);
+  }
+
+  const tripSeconds = hasInstantTrips(guildId, userId) ? 5 : requestedTypes.length * MINUTES_PER_TYPE_SECONDS;
+  const endsAt = Date.now() + tripSeconds * 1000;
+  const tripPlan = {};
+  for (const patchType of requestedTypes) {
+    tripPlan[patchType] = { seedItemId: plan[patchType].seedItemId, patchIndexes: plan[patchType].patchIndexes };
+  }
+  writeGreenhouseTrip(guildId, userId, endsAt, channelId, 'plant', { plan: tripPlan });
+
+  const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
+  const displayName = formatGladiatorDisplayName(guildId, userId, gladiatorRow.name);
+  const timestamp = `<t:${Math.floor(endsAt / 1000)}:R>`;
+  const summary = requestedTypes
+    .map((t) => `${plan[t].patchIndexes.length}x **${plan[t].seedName}** in your Greenhouse ${t} patches (#${plan[t].patchIndexes.join(', ')})`)
+    .join(', ');
+  return {
+    text: `**${displayName}** heads to the Greenhouse to plant ${summary}. Back ${timestamp}.`,
+    endsAt,
+  };
+}
+
+export async function resolveDueGreenhousePlant(row) {
+  const guildId = row.guild_id;
+  const userId = row.user_id;
+  const channelId = row.adventure_channel_id;
+  const displayName = formatGladiatorDisplayName(guildId, userId, row.name);
+  const { plan } = JSON.parse(row.farming_trip_json);
+
+  const hasMasterCompost = getOwnedQuantity(guildId, userId, MASTER_COMPOST_ID) > 0;
+  const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'farming');
+  const plantedAt = Date.now();
+  const lines = [];
+
+  for (const patchType of PATCH_TYPES) {
+    const entry = plan[patchType];
+    if (!entry) continue;
+    const seed = getItem(entry.seedItemId);
+    const growthMs = computeGrowthMs(seed, patchType, hasMasterCompost, constructionTripTimeReductionPercent, true);
+    const readyAt = plantedAt + growthMs;
+    for (const idx of entry.patchIndexes) {
+      stmtUpsertPatch.run(userId, ghType(patchType), idx, seed.id, plantedAt, readyAt);
+    }
+    const readyTimestamp = `<t:${Math.floor(readyAt / 1000)}:R>`;
+    const plural = entry.patchIndexes.length > 1 ? 'es' : '';
+    lines.push(`**${entry.patchIndexes.length}x ${seed.name}** in Greenhouse ${patchType} patch${plural} #${entry.patchIndexes.join(', ')} — ready ${readyTimestamp}`);
+  }
+
+  endGladiatorAdventure(guildId, userId);
+
+  const content = `<@${userId}> **${displayName}** finishes planting in the Greenhouse — ${lines.join('; ')}.`;
+
+  return { guildId, userId, channelId, content, components: [], files: [] };
+}
+
+function collectGreenhouseReadyTargets(guildId, userId, types) {
+  const counts = getPatchCounts(getGladiatorQp(guildId, userId));
+  const targets = {};
+  for (const t of types) {
+    const maxPatches = counts[t] ?? 0;
+    if (!maxPatches) continue;
+    const ready = getReadyPatchIndexes(userId, maxPatches, ghType(t));
+    if (ready.length) targets[t] = ready;
+  }
+  return targets;
+}
+
+export async function startGreenhouseHarvest(guildId, userId, channelId, fallbackName, targetType) {
+  guildId = GLOBAL_ID;
+  guardCanStartTrip(guildId, userId, fallbackName);
+
+  const types = targetType === 'all' ? PATCH_TYPES : [targetType];
+  const targets = collectGreenhouseReadyTargets(guildId, userId, types);
+  const touchedTypes = Object.keys(targets);
+
+  if (touchedTypes.length === 0) {
+    throw new EconomyError(
+      targetType === 'all' ? 'Nothing in the Greenhouse is ready to harvest right now.' : `Your Greenhouse ${targetType} patches aren't ready yet.`
+    );
+  }
+
+  const tripSeconds = hasInstantTrips(guildId, userId) ? 5 : touchedTypes.length * MINUTES_PER_TYPE_SECONDS;
+  const endsAt = Date.now() + tripSeconds * 1000;
+  writeGreenhouseTrip(guildId, userId, endsAt, channelId, 'harvest', { targets });
+
+  const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
+  const displayName = formatGladiatorDisplayName(guildId, userId, gladiatorRow.name);
+  const timestamp = `<t:${Math.floor(endsAt / 1000)}:R>`;
+  const totalPatches = Object.values(targets).reduce((sum, arr) => sum + arr.length, 0);
+  const plural = totalPatches > 1 ? 'es' : '';
+  return {
+    text: `**${displayName}** heads to the Greenhouse to harvest ${totalPatches} ready patch${plural} (${touchedTypes.join(', ')}). Back ${timestamp}.`,
+    endsAt,
+  };
+}
+
+export async function resolveDueGreenhouseHarvest(row) {
+  const guildId = row.guild_id;
+  const userId = row.user_id;
+  const channelId = row.adventure_channel_id;
+  const displayName = formatGladiatorDisplayName(guildId, userId, row.name);
+  const { targets } = JSON.parse(row.farming_trip_json);
+
+  let alreadyHasCompost = getOwnedQuantity(guildId, userId, MASTER_COMPOST_ID) > 0;
+  const results = [];
+  for (const patchType of PATCH_TYPES) {
+    for (const patchIndex of targets[patchType] ?? []) {
+      const result = harvestOnePatch(guildId, userId, ghType(patchType), patchIndex, alreadyHasCompost);
+      if (result.foundMasterCompost) alreadyHasCompost = true;
+      results.push(result);
+    }
+  }
+
+  endGladiatorAdventure(guildId, userId);
+
+  const foundOutfitPiece = rollSkillingOutfitFind(guildId, userId, 'farming', row.adventure_started_at, row.adventure_ends_at);
+  const content = buildHarvestSummary(userId, displayName, results, foundOutfitPiece).replace('returns from harvesting', 'returns from harvesting the Greenhouse');
+  return { guildId, userId, channelId, content, components: [], files: [] };
+}
+
+export function cancelGreenhouseTrip(guildId, userId, row) {
+  const mode = row.active_mob_id.split(':')[1];
+  const displayName = formatGladiatorDisplayName(guildId, userId, row.name);
+  endGladiatorAdventure(guildId, userId);
+
+  if (mode === 'plant') {
+    return { text: `🏳️ **${displayName}**'s Greenhouse planting trip was called back early — the seeds and compost already spent are gone, and nothing got planted.` };
+  }
+  if (mode === 'harvest') {
+    return { text: `🏳️ **${displayName}**'s Greenhouse harvesting trip was called back early — nothing was harvested, every patch is untouched.` };
+  }
+  return { text: `🏳️ **${displayName}**'s Greenhouse trip was called back early.` };
+}
+
+export function getGreenhousePatchStatus(guildId, userId) {
+  guildId = GLOBAL_ID;
+  const counts = getPatchCounts(getGladiatorQp(guildId, userId));
+  const rows = db.prepare("SELECT * FROM farming_patches WHERE user_id = ? AND patch_type LIKE 'greenhouse\\_%' ESCAPE '\\'").all(userId);
+  const byKey = Object.fromEntries(rows.map((r) => [`${r.patch_type}:${r.patch_index}`, r]));
+
+  const result = { herb: [], tree: [], fruit: [] };
+  for (const patchType of PATCH_TYPES) {
+    for (let i = 1; i <= counts[patchType]; i++) {
+      const row = byKey[`${ghType(patchType)}:${i}`];
+      if (!row || !row.seed_item_id) {
+        result[patchType].push({ index: i, empty: true });
+      } else {
+        const seed = getItem(row.seed_item_id);
+        const grown = seed ? getGrownItem(seed, patchType) : null;
+        result[patchType].push({
+          index: i,
+          seedItemId: row.seed_item_id,
+          grownName: grown?.name ?? seed?.name ?? 'Unknown',
+          readyAt: row.ready_at,
+          ready: Date.now() >= row.ready_at,
+        });
+      }
+    }
+  }
+  return result;
 }

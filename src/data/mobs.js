@@ -114,6 +114,7 @@ export const MOBS = [
     xpMultiplier: 1.0,
     coinRange: [16, 30],
     resourceWeight: 35,
+    seedDrop: true,
   },
   {
     id: 'hollow_skitterling',

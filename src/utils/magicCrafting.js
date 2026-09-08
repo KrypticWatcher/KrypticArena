@@ -1,8 +1,8 @@
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
@@ -26,8 +26,11 @@ const ENCHANTED_THREAD_PER_PIECE = { small: 2, large: 4 };
 
 const SILK_PER_PIECE_BY_TIER = { 1: 1, 5: 2, 10: 3 };
 
-export function getMaxMagicCraftingQuantity() {
-  return MAX_YIELD;
+const BOOSTED_QUANTITY_MULTIPLIER = 1.5;
+const BOOSTED_SPEED_MULTIPLIER = 0.7;
+
+export function getMaxMagicCraftingQuantity(useBoostedMode = false) {
+  return useBoostedMode ? Math.round(MAX_YIELD * BOOSTED_QUANTITY_MULTIPLIER) : MAX_YIELD;
 }
 
 function getImbuedSilk() {
@@ -67,16 +70,18 @@ export function getAffordableMagicCraftingQuantity(guildId, userId, productId, r
   return Math.max(0, Math.min(requestedQuantity, affordableBySilk, affordableByThread));
 }
 
-export function computeMagicCraftingTripSeconds(quantity) {
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / MAX_YIELD;
+export function computeMagicCraftingTripSeconds(quantity, useBoostedMode = false) {
+  const secondsPerUnit = ((FULL_TRIP_MINUTES * 60) / MAX_YIELD) * (useBoostedMode ? BOOSTED_SPEED_MULTIPLIER : 1);
   return Math.max(MIN_TRIP_SECONDS, Math.round(quantity * secondsPerUnit));
 }
 
 export function describeMagicCraftingActiveTrip(activeMobId, timestamp) {
   if (!activeMobId || !activeMobId.startsWith('magic_crafting:')) return null;
-  const productId = Number(activeMobId.split(':')[1]);
+  const [, productIdStr, boostedFlag] = activeMobId.split(':');
+  const productId = Number(productIdStr);
   const product = getItem(productId);
-  return `📜 Out enchanting **${product ? product.name : 'gear'}**. Back ${timestamp}.`;
+  const boostedNote = boostedFlag === 'boosted' ? " at the Crafter's Workshop" : '';
+  return `📜 Out enchanting${boostedNote} **${product ? product.name : 'gear'}**. Back ${timestamp}.`;
 }
 
 export function getMagicCraftingProducts() {
@@ -86,7 +91,7 @@ export function getMagicCraftingProducts() {
   return products.map((p) => ({ ...p, silkCost: silkCostForProduct(p), threadCost: threadCostForProduct(p) }));
 }
 
-export async function startMagicCraftingTrip(guildId, userId, channelId, fallbackName, productId, quantity) {
+export async function startMagicCraftingTrip(guildId, userId, channelId, fallbackName, productId, quantity, useBoostedMode = false) {
   guildId = GLOBAL_ID;
   if (isGladiatorAdventuring(guildId, userId)) {
     const profile = getGladiatorProfile(guildId, userId, fallbackName);
@@ -96,6 +101,10 @@ export async function startMagicCraftingTrip(guildId, userId, channelId, fallbac
   }
   if (hasUnclaimedAdventure(guildId, userId)) {
     throw new EconomyError("Your Gladiator's last trip hasn't finished resolving yet — try again in a moment.");
+  }
+
+  if (useBoostedMode && getProjectCurrentTier(userId, 'workshop') < 1) {
+    throw new EconomyError("You need to build the Crafter's Workshop (Tier 1+) to use Boosted Mode — see /building.");
   }
 
   const product = getItem(productId);
@@ -112,7 +121,7 @@ export async function startMagicCraftingTrip(guildId, userId, channelId, fallbac
   const currentLevel = getSkillLevel(guildId, userId, 'crafting');
   if (currentLevel < tier) throw new EconomyError(`You need Crafting level ${tier} [You are Level ${currentLevel}].`);
 
-  const maxQty = getMaxMagicCraftingQuantity();
+  const maxQty = getMaxMagicCraftingQuantity(useBoostedMode);
   const silkCost = silkCostForProduct(product);
   const threadCost = threadCostForProduct(product);
   const silk = getImbuedSilk();
@@ -150,15 +159,15 @@ export async function startMagicCraftingTrip(guildId, userId, channelId, fallbac
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'crafting');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
-    : applyConstructionTripTimeReduction(computeMagicCraftingTripSeconds(quantity), constructionTripTimeReductionPercent);
+    ? INSTANT_TRIP_SECONDS
+    : applyConstructionTripTimeReduction(computeMagicCraftingTripSeconds(quantity, useBoostedMode), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
-  const syntheticId = `magic_crafting:${productId}`;
+  const syntheticId = useBoostedMode ? `magic_crafting:${productId}:boosted` : `magic_crafting:${productId}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-  recordLastTripSettings(userId, MAGIC_CRAFTING_TRIP_TYPE, { productId, quantity });
+  recordLastTripSettings(userId, MAGIC_CRAFTING_TRIP_TYPE, { productId, quantity, useBoostedMode });
 
   addItemToInventory(guildId, userId, silk.id, -silkNeeded);
   addItemToInventory(guildId, userId, thread.id, -threadNeeded);
@@ -173,7 +182,9 @@ export async function resolveDueMagicCrafting(row) {
   const userId = row.user_id;
   const name = row.name;
   const channelId = row.adventure_channel_id;
-  const productId = Number(row.active_mob_id.split(':')[1]);
+  const [, productIdStr, boostedFlag] = row.active_mob_id.split(':');
+  const productId = Number(productIdStr);
+  const useBoostedMode = boostedFlag === 'boosted';
   const quantity = row.slay_quantity;
 
   const product = getItem(productId);

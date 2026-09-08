@@ -12,7 +12,7 @@ import { describeFletchingActiveTrip } from '../../utils/fletching.js';
 import { describeCraftingActiveTrip } from '../../utils/crafting.js';
 import { describeMagicCraftingActiveTrip } from '../../utils/magicCrafting.js';
 import { describeTanningActiveTrip } from '../../utils/tanning.js';
-import { describeFarmingActiveTrip } from '../../utils/farming.js';
+import { describeFarmingActiveTrip, describeGreenhouseActiveTrip } from '../../utils/farming.js';
 
 function progressBar(progress, width = 14) {
   const filled = Math.round(Math.max(0, Math.min(1, progress)) * width);
@@ -59,6 +59,7 @@ export function buildGladiatorStatusEmbed(guildId, discordUser) {
         describeMagicCraftingActiveTrip(profile.activeMobId, timestamp) ??
         describeTanningActiveTrip(profile.activeMobId, timestamp) ??
         describeFarmingActiveTrip(profile.activeMobId, timestamp) ??
+        describeGreenhouseActiveTrip(profile.activeMobId, timestamp) ??
         describeSlayActiveTrip(profile.activeMobId, timestamp) ??
         `🗺️ Out on Quest. Back ${timestamp}.`;
 

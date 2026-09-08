@@ -1,7 +1,7 @@
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
 import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
@@ -112,7 +112,7 @@ export async function startSmeltTrip(guildId, userId, channelId, fallbackName, t
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'smithing');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
+    ? INSTANT_TRIP_SECONDS
     : applyConstructionTripTimeReduction(computeSmeltTripSeconds(tier, barQuantity, useForge), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
@@ -291,7 +291,7 @@ export async function startSmithTrip(guildId, userId, channelId, fallbackName, p
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'smithing');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
+    ? INSTANT_TRIP_SECONDS
     : applyConstructionTripTimeReduction(computeSmithTripSeconds(tier, quantity, useForge), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 

@@ -135,7 +135,49 @@ function rollCoins(mob) {
   return lo + Math.floor(Math.random() * (hi - lo + 1));
 }
 
+const SEED_DROP_TABLE = [
+  { tier: 1, weight: 30, qtyMin: 30, qtyMax: 50 },
+  { tier: 5, weight: 22, qtyMin: 20, qtyMax: 35 },
+  { tier: 10, weight: 16, qtyMin: 15, qtyMax: 25 },
+  { tier: 20, weight: 12, qtyMin: 10, qtyMax: 18 },
+  { tier: 35, weight: 8, qtyMin: 6, qtyMax: 12 },
+  { tier: 45, weight: 5, qtyMin: 4, qtyMax: 8 },
+  { tier: 55, weight: 3, qtyMin: 3, qtyMax: 6 },
+  { tier: 65, weight: 2, qtyMin: 2, qtyMax: 4 },
+  { tier: 75, weight: 1.2, qtyMin: 1, qtyMax: 3 },
+  { tier: 85, weight: 0.6, qtyMin: 1, qtyMax: 2 },
+  { tier: 92, weight: 0.3, qtyMin: 1, qtyMax: 1 },
+];
+const SEED_DROP_TOTAL_WEIGHT = SEED_DROP_TABLE.reduce((sum, row) => sum + row.weight, 0);
+
+function getSeedsForTier(tier) {
+  return ITEMS.filter((i) => i.type === 'resource' && i.category === 'seed' && i.tier === tier);
+}
+
+function rollSeedResource() {
+  let roll = Math.random() * SEED_DROP_TOTAL_WEIGHT;
+  let picked = null;
+  for (const row of SEED_DROP_TABLE) {
+    if (roll < row.weight) {
+      picked = row;
+      break;
+    }
+    roll -= row.weight;
+  }
+  if (!picked) return null;
+
+  const pool = getSeedsForTier(picked.tier);
+  if (pool.length === 0) return null;
+  const seed = pickRandom(pool);
+  const quantity = picked.qtyMin + Math.floor(Math.random() * (picked.qtyMax - picked.qtyMin + 1));
+  return { itemId: seed.id, quantity };
+}
+
 function rollResource(mob) {
+  if (mob.seedDrop) {
+    if (Math.random() * 100 >= mob.resourceWeight) return null;
+    return rollSeedResource();
+  }
   if (!mob.resourceItemId) return null;
   if (Math.random() * 100 >= mob.resourceWeight) return null;
   return { itemId: mob.resourceItemId, quantity: 2 + Math.floor(Math.random() * 3) };
@@ -146,7 +188,7 @@ function getImbuedSilkItem() {
   return ITEMS.find((i) => i.name === 'Imbued Silk');
 }
 function rollImbuedSilkForTrip(mob) {
-  if (!mob.resourceItemId) return null;
+  if (!mob.resourceItemId && !mob.seedDrop) return null;
   const imbuedSilk = getImbuedSilkItem();
   if (!imbuedSilk) return null;
   const maxSilk = IMBUED_SILK_MAX_BY_TIER[mob.tier] ?? 2;

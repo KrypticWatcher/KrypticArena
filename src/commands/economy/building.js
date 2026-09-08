@@ -7,7 +7,7 @@ import {
   collectPassiveAll,
   getActiveBuilds,
   getProjectSummary,
-  formatRemaining,
+  discordRelativeTimestamp,
   PROJECTS,
 } from '../../utils/construction.js';
 
@@ -89,7 +89,7 @@ export default {
         }
         const lines = builds.map((b) => {
           if (b.ready) return `**${b.name}** — Tier ${b.tier} is ready to complete!`;
-          return `**${b.name}** — Tier ${b.tier} building, ${formatRemaining(b.remainingMs)} remaining.`;
+          return `**${b.name}** — Tier ${b.tier} building, ready ${discordRelativeTimestamp(b.readyAt)}.`;
         });
         return interaction.reply({ content: lines.join('\n') });
       }

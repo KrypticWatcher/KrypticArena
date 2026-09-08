@@ -31,7 +31,7 @@ import { resolveDueFletching } from './fletching.js';
 import { resolveDueCrafting } from './crafting.js';
 import { resolveDueMagicCrafting } from './magicCrafting.js';
 import { resolveDueTanning } from './tanning.js';
-import { resolveDueFarmingPlant, resolveDueFarmingHarvest, resolveDueFarmingReplant, cancelFarmingTrip } from './farming.js';
+import { resolveDueFarmingPlant, resolveDueFarmingHarvest, resolveDueFarmingReplant, cancelFarmingTrip, resolveDueGreenhousePlant, resolveDueGreenhouseHarvest, cancelGreenhouseTrip } from './farming.js';
 import { addCash } from './economy.js';
 import { addArenaCoins } from './arena.js';
 import { formatMoney, formatArena } from './format.js';
@@ -222,12 +222,13 @@ export async function resolveInstantAdventure(guildId, userId) {
 
 const CANCELLED_QUEST_ARENA_REWARD = [10, 30];
 
-const SKILL_TRIP_PREFIXES = ['gathering:', 'cooking:', 'herbalism:', 'hunting:', 'smelt:', 'smith:', 'fletching:', 'crafting:', 'magic_crafting:'];
+const SKILL_TRIP_PREFIXES = ['gathering:', 'multires:', 'cooking:', 'herbalism:', 'hunting:', 'smelt:', 'smith:', 'fletching:', 'crafting:', 'magic_crafting:'];
 
 function classifyActiveTrip(row) {
   if (!row || !(row.adventure_ends_at > Date.now())) return null;
   if (row.active_boss_id) return 'boss';
   if (row.active_mob_id?.startsWith('farming:')) return 'farming';
+  if (row.active_mob_id?.startsWith('greenhouse:')) return 'greenhouse';
   if (row.active_mob_id && SKILL_TRIP_PREFIXES.some((p) => row.active_mob_id.startsWith(p))) return 'skill';
   if (row.active_mob_id) return 'slay';
   return 'adventure';
@@ -254,6 +255,11 @@ export function cancelActiveTripFor(guildId, userId) {
 
   if (kind === 'farming') {
     const { text } = cancelFarmingTrip(guildId, userId, row);
+    return { text, kind };
+  }
+
+  if (kind === 'greenhouse') {
+    const { text } = cancelGreenhouseTrip(guildId, userId, row);
     return { text, kind };
   }
 
@@ -316,6 +322,12 @@ export async function resolveDueAdventure(row) {
   }
   if (row.active_mob_id === 'farming:replant') {
     return resolveDueFarmingReplant(row);
+  }
+  if (row.active_mob_id === 'greenhouse:plant') {
+    return resolveDueGreenhousePlant(row);
+  }
+  if (row.active_mob_id === 'greenhouse:harvest') {
+    return resolveDueGreenhouseHarvest(row);
   }
   if (row.active_mob_id) {
     return resolveDueSlay(row);

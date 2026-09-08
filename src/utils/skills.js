@@ -1,6 +1,7 @@
 import db from '../database.js';
 import { GLOBAL_ID } from './globalId.js';
 import { xpForLevel, levelForXp, MAX_GLADIATOR_LEVEL } from './xp.js';
+import { getEquipment } from './inventory.js';
 
 export const MAX_SKILL_LEVEL = MAX_GLADIATOR_LEVEL;
 
@@ -9,6 +10,35 @@ export const SKILL_IDS = [
   'mining', 'smithing', 'woodcutting', 'fletching', 'fishing',
   'cooking', 'farming', 'herbalism', 'hunting', 'crafting', 'construction',
 ];
+
+// Skilling outfits: 5 gear-slot cosmetics per relevant skill (helmet, chest,
+// legs, gloves, boots — see items.js, ids 43001-43025). Each equipped piece
+// adds its own xpBonusPercent for that skill; the bonus only counts pieces
+// actually worn in the Skilling ("misc") gear set, not merely owned.
+const OUTFIT_SLOTS = ['helmet', 'chest', 'legs', 'gloves', 'boots'];
+
+function getEquippedOutfitBonusPercent(guildId, userId, skillId) {
+  const misc = getEquipment(guildId, userId, 'misc');
+  let bonusPercent = 0;
+  for (const slot of OUTFIT_SLOTS) {
+    const item = misc[slot];
+    if (item?.type === 'outfit' && item.skill === skillId) {
+      bonusPercent += item.xpBonusPercent ?? 0;
+    }
+  }
+  return bonusPercent;
+}
+
+function applyOutfitXpBonus(amount, bonusPercent) {
+  if (bonusPercent <= 0) return amount;
+  const boosted = Math.round(amount * (1 + bonusPercent / 100));
+  // Round to nearest, but a worn bonus should never round away to nothing.
+  return Math.max(boosted, amount + 1);
+}
+
+export function formatOutfitBonusNote(bonusPercent) {
+  return bonusPercent > 0 ? ` (+${bonusPercent}% Outfit Bonus)` : '';
+}
 
 const stmtGetXp = db.prepare('SELECT xp FROM skill_xp WHERE guild_id = ? AND user_id = ? AND skill_id = ?');
 const stmtSetXp = db.prepare(`
@@ -54,11 +84,20 @@ export const addSkillXp = db.transaction((guildId, userId, skillId, amount) => {
   if (!Number.isInteger(amount) || amount <= 0) {
     throw new Error('Skill XP amount must be a positive whole number.');
   }
+  const bonusPercent = getEquippedOutfitBonusPercent(guildId, userId, skillId);
+  const boostedAmount = applyOutfitXpBonus(amount, bonusPercent);
   const before = getSkillXp(guildId, userId, skillId);
   const beforeLevel = levelForXp(before);
   const maxXp = xpForLevel(MAX_SKILL_LEVEL);
-  const newXp = Math.min(maxXp, before + amount);
+  const newXp = Math.min(maxXp, before + boostedAmount);
   const afterLevel = levelForXp(newXp);
   stmtSetXp.run(guildId, userId, skillId, newXp);
-  return { xpGained: newXp - before, xpTotal: newXp, beforeLevel, afterLevel, leveledUp: afterLevel > beforeLevel };
+  return {
+    xpGained: newXp - before,
+    xpTotal: newXp,
+    beforeLevel,
+    afterLevel,
+    leveledUp: afterLevel > beforeLevel,
+    outfitBonusPercent: bonusPercent,
+  };
 });

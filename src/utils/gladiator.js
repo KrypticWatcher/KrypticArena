@@ -124,6 +124,10 @@ export function hasInstantTrips(guildId, userId) {
   return Boolean(getGladiatorRow(guildId, userId)?.instant_trips);
 }
 
+// Flat trip length granted by the Instant Trips perk. Kept here as the single
+// source of truth so every skill file stays in sync if this ever changes.
+export const INSTANT_TRIP_SECONDS = 10;
+
 export const TRADE_LEVEL_REQUIREMENT = 5;
 
 export function meetsTradeLevelRequirement(guildId, userId, fallbackName) {

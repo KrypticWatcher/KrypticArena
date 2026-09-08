@@ -117,19 +117,8 @@ function getBuildRequirements(project, buildTier) {
   return requirements;
 }
 
-function formatMinutes(totalMinutes) {
-  if (totalMinutes < 60) return `${totalMinutes} min`;
-  const hours = totalMinutes / 60;
-  if (Number.isInteger(hours)) return `${hours} hour${hours === 1 ? '' : 's'}`;
-  return `${hours.toFixed(1)} hours`;
-}
-
-export function formatRemaining(ms) {
-  const totalMinutes = Math.max(1, Math.ceil(ms / 60_000));
-  if (totalMinutes < 60) return `${totalMinutes} min`;
-  const hours = Math.floor(totalMinutes / 60);
-  const mins = totalMinutes % 60;
-  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+export function discordRelativeTimestamp(ms) {
+  return `<t:${Math.floor(ms / 1000)}:R>`;
 }
 
 function describeBonus(bonus) {
@@ -195,7 +184,7 @@ export async function startBuild(guildId, userId, fallbackName, projectId) {
   const summary = requirements.map((r) => `${actualQty(r.qty)}x ${r.name}`).join(', ');
   let text = `🏗️ Materials submitted for **${project.name}** Tier ${buildTier}: ${summary}.`;
   if (hasSaw) text += ` (Builder's Saw reduced costs.)`;
-  text += `\nReady in **${formatMinutes(minutes)}** — use the complete command once it's done.`;
+  text += `\n⏳ Ready ${discordRelativeTimestamp(row.build_ready_at)} — use the complete command once it's done.`;
   return { text };
 }
 
@@ -210,7 +199,7 @@ export async function completeBuild(guildId, userId, fallbackName, projectId) {
   const now = Date.now();
   if (now < row.build_ready_at) {
     throw new EconomyError(
-      `${project.name}'s Tier ${row.building_tier} build isn't ready yet — ${formatRemaining(row.build_ready_at - now)} remaining.`
+      `${project.name}'s Tier ${row.building_tier} build isn't ready yet — ready ${discordRelativeTimestamp(row.build_ready_at)}.`
     );
   }
 
@@ -321,6 +310,7 @@ export function getActiveBuilds(userId) {
       tier: row.building_tier,
       ready: now >= row.build_ready_at,
       remainingMs: Math.max(0, row.build_ready_at - now),
+      readyAt: row.build_ready_at,
     });
   }
   return builds;

@@ -30,10 +30,10 @@ import {
 import { buildGladiatorStatusEmbed } from './commands/economy/gladiator.js';
 import { parseBossRepeatCustomId } from './utils/bossChallenges.js';
 import { startSlayFor, SLAY_TRIP_TYPE } from './utils/slay.js';
-import { startGatheringTrip, GATHERING_TRIP_TYPES } from './utils/gathering.js';
+import { startGatheringTrip, GATHERING_TRIP_TYPES, startMultiResourceTrip, MULTI_RESOURCE_TRIP_TYPES } from './utils/gathering.js';
 import { startCookingTrip, getAffordableCookingQuantity, COOKING_TRIP_TYPE } from './utils/cooking.js';
 import { startHerbalismTrip, getAffordableHerbalismQuantity, HERBALISM_TRIP_TYPE } from './utils/herbalism.js';
-import { startHuntingTrip, HUNTING_TRIP_TYPE } from './utils/hunting.js';
+import { startHuntingTrip, HUNTING_TRIP_TYPE, startLodgeTrip, LODGE_TRIP_TYPE } from './utils/hunting.js';
 import { startSmeltTrip, startSmithTrip, getAffordableSmeltQuantity, getAffordableSmithQuantity, SMELT_TRIP_TYPE, SMITH_TRIP_TYPE } from './utils/smithing.js';
 import { startFletchingTrip, getAffordableFletchingQuantity, FLETCHING_TRIP_TYPE } from './utils/fletching.js';
 import { startCraftingTrip, getAffordableCraftingQuantity, CRAFTING_TRIP_TYPE } from './utils/crafting.js';
@@ -380,6 +380,14 @@ client.on('interactionCreate', async (interaction) => {
         }
         if (tripType === HUNTING_TRIP_TYPE) {
           const result = await startHuntingTrip(interaction.guildId, clickerId, interaction.channelId, interaction.user.displayName, settings.huntType, settings.tier, settings.quantity);
+          return interaction.reply({ content: result.text });
+        }
+        if (tripType === LODGE_TRIP_TYPE) {
+          const result = await startLodgeTrip(interaction.guildId, clickerId, interaction.channelId, interaction.user.displayName);
+          return interaction.reply({ content: result.text });
+        }
+        if (Object.values(MULTI_RESOURCE_TRIP_TYPES).includes(tripType)) {
+          const result = await startMultiResourceTrip(interaction.guildId, clickerId, interaction.channelId, interaction.user.displayName, settings.projectId);
           return interaction.reply({ content: result.text });
         }
         if (tripType === SMELT_TRIP_TYPE) {

@@ -1,14 +1,17 @@
 import db from '../database.js';
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
-import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { getSkillLevel, addSkillXp, formatOutfitBonusNote } from './skills.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
 import { getConstructionYieldBoostPercent, applyConstructionYieldBoost, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
+import { getArenaBalance, addArenaCoins } from './economy.js';
+import { formatArena } from './format.js';
 import { addItemToInventory, getAllEquipmentSets } from './inventory.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { recordLastTripSettings, skillRepeatTripRow } from './lastTripSettings.js';
+import { rollSkillingOutfitFind } from './specialToolFinds.js';
 
 export const GATHERING_TRIP_TYPES = { mining: 'mining', woodcutting: 'woodcutting', fishing: 'fishing' };
 
@@ -37,10 +40,24 @@ export function getMaxQuantityForGatheringTier(tier) {
   return MATCHED_YIELD_BY_TIER[tier] ?? 30;
 }
 
-export function computeGatheringTripSeconds(tier, quantity) {
+// Extension point: the base (unreduced) length of a full trip. Currently a flat
+// 30 minutes for everyone, but any future buff/perk that lengthens or shortens
+// the max trip duration should plug in here — call sites already pass
+// guildId/userId through so this can look up per-user bonuses without further
+// signature changes.
+export function getBaseTripSeconds(guildId, userId) {
+  return FULL_TRIP_MINUTES * 60;
+}
+
+export function computeGatheringTripSeconds(tier, quantity, guildId, userId) {
   const maxQty = getMaxQuantityForGatheringTier(tier);
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / maxQty;
-  return Math.max(MIN_TRIP_SECONDS, Math.round(quantity * secondsPerUnit));
+  const baseSeconds = getBaseTripSeconds(guildId, userId);
+  if (maxQty <= 1) return baseSeconds;
+  // Anchored so quantity 1 always lands exactly on the reachable minimum and
+  // quantity maxQty always lands exactly on the full trip duration.
+  const secondsPerUnit = (baseSeconds - MIN_TRIP_SECONDS) / (maxQty - 1);
+  const seconds = MIN_TRIP_SECONDS + (quantity - 1) * secondsPerUnit;
+  return Math.max(MIN_TRIP_SECONDS, Math.round(seconds));
 }
 
 export const GATHERING_SKILLS = {
@@ -127,8 +144,8 @@ export async function startGatheringTrip(guildId, userId, channelId, fallbackNam
 
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, config.skillId);
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
-    : applyConstructionTripTimeReduction(computeGatheringTripSeconds(resourceTier, quantity), constructionTripTimeReductionPercent);
+    ? INSTANT_TRIP_SECONDS
+    : applyConstructionTripTimeReduction(computeGatheringTripSeconds(resourceTier, quantity, guildId, userId), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `gathering:${skillKey}:${resourceTier}`;
@@ -198,6 +215,15 @@ const MULTI_RESOURCE_CONFIGS = {
   },
 };
 
+export const MULTI_RESOURCE_TRIP_TYPE_PREFIX = 'multires';
+export const MULTI_RESOURCE_TRIP_TYPES = {
+  quarry: 'multires:quarry',
+  lumberyard: 'multires:lumberyard',
+  dock: 'multires:dock',
+};
+
+const MULTI_RESOURCE_TRIP_COST_ARENA_COINS = 25_000;
+
 export async function startMultiResourceTrip(guildId, userId, channelId, fallbackName, projectId) {
   guildId = GLOBAL_ID;
   const config = MULTI_RESOURCE_CONFIGS[projectId];
@@ -217,27 +243,37 @@ export async function startMultiResourceTrip(guildId, userId, channelId, fallbac
     throw new EconomyError(`You need to build the ${config.buildingName} (Tier 1+) to send this trip — see /building.`);
   }
 
+  const arenaBalance = getArenaBalance(guildId, userId);
+  if (arenaBalance < MULTI_RESOURCE_TRIP_COST_ARENA_COINS) {
+    throw new EconomyError(
+      `This trip costs ${formatArena(MULTI_RESOURCE_TRIP_COST_ARENA_COINS)} — you only have ${formatArena(arenaBalance)}.`
+    );
+  }
+
   const currentLevel = getSkillLevel(guildId, userId, config.skillId);
   const toolTier = getEquippedToolTier(guildId, userId, config.toolCategory);
   if (!toolTier) {
     throw new EconomyError(`You need the right tool equipped in your Skilling set for ${config.skillId}.`);
   }
 
+  addArenaCoins(guildId, userId, -MULTI_RESOURCE_TRIP_COST_ARENA_COINS, `${projectId}_trip`);
+
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, config.skillId);
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
-    : applyConstructionTripTimeReduction(FULL_TRIP_MINUTES * 60, constructionTripTimeReductionPercent);
+    ? INSTANT_TRIP_SECONDS
+    : applyConstructionTripTimeReduction(getBaseTripSeconds(guildId, userId), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `multires:${projectId}:${currentLevel}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, 0, guildId, userId);
+  recordLastTripSettings(userId, MULTI_RESOURCE_TRIP_TYPES[projectId], { projectId });
 
   const displayName = formatGladiatorDisplayName(guildId, userId, gladiatorRow.name);
   const timestamp = `<t:${Math.floor(endsAt / 1000)}:R>`;
-  return { text: `${config.emoji} **${displayName}** heads into ${config.destinationText} for a mixed haul. Back ${timestamp}.`, endsAt };
+  return { text: `${config.emoji} **${displayName}** heads into ${config.destinationText} for a mixed haul (cost: ${formatArena(MULTI_RESOURCE_TRIP_COST_ARENA_COINS)}). Back ${timestamp}.`, endsAt };
 }
 
 export async function resolveDueMultiResourceTrip(row) {
@@ -276,9 +312,11 @@ export async function resolveDueMultiResourceTrip(row) {
   }
 
   const xpResult = addSkillXp(guildId, userId, config.skillId, totalXp);
+  const foundOutfitPiece = rollSkillingOutfitFind(guildId, userId, config.skillId, row.adventure_started_at, row.adventure_ends_at);
 
   let text = `<@${userId}> **${displayName}** returns from ${config.destinationText} with: ${grantedLines.join(', ')}.`;
-  text += `\n✨ **+${totalXp.toLocaleString('en-US')} ${config.skillId} XP**`;
+  if (foundOutfitPiece) text += `\n\n🎁 You found the **${foundOutfitPiece.name}**!`;
+  text += `\n✨ **+${xpResult.xpGained.toLocaleString('en-US')} ${config.skillId} XP**${formatOutfitBonusNote(xpResult.outfitBonusPercent)}`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
 
   const gladXpResult = awardGladiatorXpFromSkilling(guildId, userId, xpResult.xpGained, name);
@@ -315,11 +353,13 @@ export async function resolveDueGathering(row) {
   const xpPerUnit = XP_PER_UNIT_BY_TIER[resourceTier] ?? (2 + Math.round(resourceTier / 10));
   const totalXp = xpPerUnit * quantity;
   const xpResult = addSkillXp(guildId, userId, config.skillId, totalXp);
+  const foundOutfitPiece = rollSkillingOutfitFind(guildId, userId, config.skillId, row.adventure_started_at, row.adventure_ends_at);
 
   let text = `<@${userId}> **${displayName}** returns with **${actualYield}x ${resourceItem.name}**.`;
   if (yieldMultiplier > 1) text += ` ⬆️ *(overtiered tool, +15% yield)*`;
   else if (yieldMultiplier < 1) text += ` ⬇️ *(tool below this tier, ${Math.round((1 - yieldMultiplier) * 100)}% less yield)*`;
-  text += `\n✨ **+${totalXp.toLocaleString('en-US')} ${config.skillId} XP**`;
+  if (foundOutfitPiece) text += `\n\n🎁 You found the **${foundOutfitPiece.name}**!`;
+  text += `\n✨ **+${xpResult.xpGained.toLocaleString('en-US')} ${config.skillId} XP**${formatOutfitBonusNote(xpResult.outfitBonusPercent)}`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
 
   const gladXpResult = awardGladiatorXpFromSkilling(guildId, userId, xpResult.xpGained, name);

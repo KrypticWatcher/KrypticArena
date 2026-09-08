@@ -20,7 +20,7 @@ import { describeSmithingActiveTrip } from './smithing.js';
 import { describeFletchingActiveTrip } from './fletching.js';
 import { describeCraftingActiveTrip } from './crafting.js';
 import { describeMagicCraftingActiveTrip } from './magicCrafting.js';
-import { describeFarmingActiveTrip } from './farming.js';
+import { describeFarmingActiveTrip, describeGreenhouseActiveTrip } from './farming.js';
 
 function describeActiveTripActivity(profile) {
   if (profile.activeBossId) {
@@ -37,6 +37,7 @@ function describeActiveTripActivity(profile) {
     describeCraftingActiveTrip(profile.activeMobId, '') ??
     describeMagicCraftingActiveTrip(profile.activeMobId, '') ??
     describeFarmingActiveTrip(profile.activeMobId, '') ??
+    describeGreenhouseActiveTrip(profile.activeMobId, '') ??
     describeSlayActiveTrip(profile.activeMobId, '');
   if (line) {
 

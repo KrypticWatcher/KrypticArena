@@ -1,18 +1,19 @@
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
-import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { getSkillLevel, addSkillXp, formatOutfitBonusNote } from './skills.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
 import { getConstructionYieldBoostPercent, applyConstructionYieldBoost, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 import { multiResourceTierWeights, distributeByWeight, MULTI_RESOURCE_QUANTITY_BONUS_MULTIPLIER } from './gathering.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
 import db from '../database.js';
-import { rollSpecialToolFind } from './specialToolFinds.js';
+import { rollSpecialToolFind, rollSkillingOutfitFind } from './specialToolFinds.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { recordLastTripSettings, skillRepeatTripRow } from './lastTripSettings.js';
 
 export const HUNTING_TRIP_TYPE = 'hunting';
+export const LODGE_TRIP_TYPE = 'lodge';
 
 const TIER_LEVELS = [1, 5, 10, 20, 35, 45, 55, 65, 75, 85, 92];
 const FULL_TRIP_MINUTES = 30;
@@ -30,10 +31,21 @@ const FEATHERS_PER_CATCH_BY_TIER = { 1: 1, 5: 1, 10: 2, 20: 2, 35: 3, 45: 3, 55:
 export function getMaxHuntingQuantity(tier) {
   return MAX_YIELD_BY_TIER[tier] ?? 30;
 }
-export function computeHuntingTripSeconds(tier, quantity) {
+
+// Extension point: the base (unreduced) length of a full trip — see the matching
+// getBaseTripSeconds in gathering.js. Future buffs/perks that change the max
+// trip duration should plug in here.
+export function getBaseTripSeconds(guildId, userId) {
+  return FULL_TRIP_MINUTES * 60;
+}
+
+export function computeHuntingTripSeconds(tier, quantity, guildId, userId) {
   const maxQty = getMaxHuntingQuantity(tier);
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / maxQty;
-  return Math.max(MIN_TRIP_SECONDS, Math.round(quantity * secondsPerUnit));
+  const baseSeconds = getBaseTripSeconds(guildId, userId);
+  if (maxQty <= 1) return baseSeconds;
+  const secondsPerUnit = (baseSeconds - MIN_TRIP_SECONDS) / (maxQty - 1);
+  const seconds = MIN_TRIP_SECONDS + (quantity - 1) * secondsPerUnit;
+  return Math.max(MIN_TRIP_SECONDS, Math.round(seconds));
 }
 
 function getHide(tier, quality = 'fine') {
@@ -113,8 +125,8 @@ export async function startHuntingTrip(guildId, userId, channelId, fallbackName,
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'hunting');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
-    : applyConstructionTripTimeReduction(computeHuntingTripSeconds(tier, quantity), constructionTripTimeReductionPercent);
+    ? INSTANT_TRIP_SECONDS
+    : applyConstructionTripTimeReduction(computeHuntingTripSeconds(tier, quantity, guildId, userId), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `hunting:${huntType}:${tier}`;
@@ -154,14 +166,15 @@ export async function startLodgeTrip(guildId, userId, channelId, fallbackName) {
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'hunting');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
-    : applyConstructionTripTimeReduction(FULL_TRIP_MINUTES * 60, constructionTripTimeReductionPercent);
+    ? INSTANT_TRIP_SECONDS
+    : applyConstructionTripTimeReduction(getBaseTripSeconds(guildId, userId), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
   const syntheticId = `lodge:${currentLevel}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, 0, guildId, userId);
+  recordLastTripSettings(userId, LODGE_TRIP_TYPE, {});
 
   const displayName = formatGladiatorDisplayName(guildId, userId, gladiatorRow.name);
   const timestamp = `<t:${Math.floor(endsAt / 1000)}:R>`;
@@ -200,7 +213,7 @@ export async function resolveDueLodgeTrip(row) {
   const xpResult = addSkillXp(guildId, userId, 'hunting', totalXp);
 
   let text = `<@${userId}> **${displayName}** returns from the Lodge grounds with: ${grantedLines.join(', ')}.`;
-  text += `\n✨ **+${totalXp.toLocaleString('en-US')} hunting XP**`;
+  text += `\n✨ **+${xpResult.xpGained.toLocaleString('en-US')} hunting XP**${formatOutfitBonusNote(xpResult.outfitBonusPercent)}`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
 
   const gladXpResult = awardGladiatorXpFromSkilling(guildId, userId, xpResult.xpGained, name);
@@ -235,7 +248,7 @@ export async function resolveDueHunting(row) {
     const xpResult = addSkillXp(guildId, userId, 'hunting', totalXp);
 
     let text = `<@${userId}> **${displayName}** returns from hunting **${BIRD_NAMES_BY_TIER[tier]}**: ${totalFeathers}x ${featherItem.name}.`;
-    text += `\n✨ **+${totalXp.toLocaleString('en-US')} Hunting XP**`;
+    text += `\n✨ **+${xpResult.xpGained.toLocaleString('en-US')} Hunting XP**${formatOutfitBonusNote(xpResult.outfitBonusPercent)}`;
     if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
 
     const gladXpResult = awardGladiatorXpFromSkilling(guildId, userId, xpResult.xpGained, name);
@@ -289,6 +302,7 @@ export async function resolveDueHunting(row) {
   const foundHuntersKnife = rollSpecialToolFind(
     guildId, userId, HUNTERS_KNIFE_ID, row.adventure_started_at, row.adventure_ends_at, HUNTERS_KNIFE_FIND_PERCENT
   );
+  const foundOutfitPiece = rollSkillingOutfitFind(guildId, userId, 'hunting', row.adventure_started_at, row.adventure_ends_at);
 
   let text = `<@${userId}> **${displayName}** returns from hunting **${getAnimalName(fineHide)}**:`;
   const parts = [];
@@ -297,7 +311,8 @@ export async function resolveDueHunting(row) {
   if (boostedPoor > 0) parts.push(`${boostedPoor}x ${poorHide.name}`);
   text += ` ${parts.join(', ')}.`;
   if (foundHuntersKnife) text += `\n\n🔪 You found a **Hunter's Knife**!`;
-  text += `\n✨ **+${totalXp.toLocaleString('en-US')} Hunting XP**`;
+  if (foundOutfitPiece) text += `\n\n🏕️ You found the **${foundOutfitPiece.name}**!`;
+  text += `\n✨ **+${xpResult.xpGained.toLocaleString('en-US')} Hunting XP**${formatOutfitBonusNote(xpResult.outfitBonusPercent)}`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
 
   const gladXpResult = awardGladiatorXpFromSkilling(guildId, userId, xpResult.xpGained, name);

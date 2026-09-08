@@ -1,8 +1,8 @@
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
 import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
-import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction } from './construction.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
@@ -19,8 +19,12 @@ const MAX_YIELD_BY_TIER = { 1: 100, 5: 95, 10: 90, 20: 85, 35: 78, 45: 70, 55: 6
 
 const XP_PER_UNIT_BY_TIER = { 1: 4, 5: 5, 10: 6, 20: 8, 35: 12, 45: 15, 55: 18, 65: 21, 75: 25, 85: 29, 92: 33 };
 
-export function getMaxHerbalismQuantity(tier) {
-  return MAX_YIELD_BY_TIER[tier] ?? 50;
+const BOOSTED_QUANTITY_MULTIPLIER = 1.5;
+const BOOSTED_SPEED_MULTIPLIER = 0.7;
+
+export function getMaxHerbalismQuantity(tier, useBoostedMode = false) {
+  const base = MAX_YIELD_BY_TIER[tier] ?? 50;
+  return useBoostedMode ? Math.round(base * BOOSTED_QUANTITY_MULTIPLIER) : base;
 }
 
 export function getAffordableHerbalismQuantity(guildId, userId, tier, requestedQuantity) {
@@ -35,9 +39,9 @@ export function getAffordableHerbalismQuantity(guildId, userId, tier, requestedQ
   const affordableByVials = costMultiplier > 0 ? Math.floor(ownedVials / costMultiplier) : ownedVials;
   return Math.max(0, Math.min(requestedQuantity, affordableByHerbs, affordableByVials));
 }
-export function computeHerbalismTripSeconds(tier, quantity) {
-  const maxQty = getMaxHerbalismQuantity(tier);
-  const secondsPerUnit = (FULL_TRIP_MINUTES * 60) / maxQty;
+export function computeHerbalismTripSeconds(tier, quantity, useBoostedMode = false) {
+  const normalMaxQty = getMaxHerbalismQuantity(tier, false);
+  const secondsPerUnit = ((FULL_TRIP_MINUTES * 60) / normalMaxQty) * (useBoostedMode ? BOOSTED_SPEED_MULTIPLIER : 1);
   return Math.max(MIN_TRIP_SECONDS, Math.round(quantity * secondsPerUnit));
 }
 
@@ -53,12 +57,14 @@ function getVial() {
 
 export function describeHerbalismActiveTrip(activeMobId, timestamp) {
   if (!activeMobId || !activeMobId.startsWith('herbalism:')) return null;
-  const tier = Number(activeMobId.split(':')[1]);
+  const [, tierStr, boostedFlag] = activeMobId.split(':');
+  const tier = Number(tierStr);
   const potion = getPotion(tier);
-  return `🧪 Out brewing **${potion ? potion.name : 'potions'}**. Back ${timestamp}.`;
+  const boostedNote = boostedFlag === 'boosted' ? ' at the Apothecary' : '';
+  return `🧪 Out brewing${boostedNote} **${potion ? potion.name : 'potions'}**. Back ${timestamp}.`;
 }
 
-export async function startHerbalismTrip(guildId, userId, channelId, fallbackName, tier, quantity) {
+export async function startHerbalismTrip(guildId, userId, channelId, fallbackName, tier, quantity, useBoostedMode = false) {
   guildId = GLOBAL_ID;
   if (isGladiatorAdventuring(guildId, userId)) {
     const profile = getGladiatorProfile(guildId, userId, fallbackName);
@@ -70,6 +76,10 @@ export async function startHerbalismTrip(guildId, userId, channelId, fallbackNam
     throw new EconomyError("Your Gladiator's last trip hasn't finished resolving yet — try again in a moment.");
   }
 
+  if (useBoostedMode && getProjectCurrentTier(userId, 'apothecary') < 1) {
+    throw new EconomyError('You need to build the Apothecary (Tier 1+) to use Boosted Mode — see /building.');
+  }
+
   const herb = getHerb(tier);
   const vial = getVial();
   if (!herb) throw new EconomyError('Invalid tier.');
@@ -79,7 +89,7 @@ export async function startHerbalismTrip(guildId, userId, channelId, fallbackNam
     throw new EconomyError(`You need Herbalism level ${tier} for this herb [You are Level ${currentLevel}].`);
   }
 
-  const maxQty = getMaxHerbalismQuantity(tier);
+  const maxQty = getMaxHerbalismQuantity(tier, useBoostedMode);
   const constructionReductionPercent = getConstructionCostReductionPercent(userId, 'herbalism');
   const ownedHerbs = getOwnedQuantity(guildId, userId, herb.id);
   const ownedVials = getOwnedQuantity(guildId, userId, vial.id);
@@ -105,15 +115,15 @@ export async function startHerbalismTrip(guildId, userId, channelId, fallbackNam
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'herbalism');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
-    : applyConstructionTripTimeReduction(computeHerbalismTripSeconds(tier, quantity), constructionTripTimeReductionPercent);
+    ? INSTANT_TRIP_SECONDS
+    : applyConstructionTripTimeReduction(computeHerbalismTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
-  const syntheticId = `herbalism:${tier}`;
+  const syntheticId = useBoostedMode ? `herbalism:${tier}:boosted` : `herbalism:${tier}`;
   db.prepare(
     'UPDATE gladiators SET adventure_started_at = ?, adventure_ends_at = ?, adventure_channel_id = ?, active_mob_id = ?, slay_quantity = ? WHERE guild_id = ? AND user_id = ?'
   ).run(Date.now(), endsAt, channelId, syntheticId, quantity, guildId, userId);
-  recordLastTripSettings(userId, HERBALISM_TRIP_TYPE, { tier, quantity });
+  recordLastTripSettings(userId, HERBALISM_TRIP_TYPE, { tier, quantity, useBoostedMode });
 
   addItemToInventory(guildId, userId, herb.id, -herbCost);
   addItemToInventory(guildId, userId, vial.id, -vialCost);
@@ -128,7 +138,9 @@ export async function resolveDueHerbalism(row) {
   const userId = row.user_id;
   const name = row.name;
   const channelId = row.adventure_channel_id;
-  const tier = Number(row.active_mob_id.split(':')[1]);
+  const [, tierStr, boostedFlag] = row.active_mob_id.split(':');
+  const tier = Number(tierStr);
+  const useBoostedMode = boostedFlag === 'boosted';
   const quantity = row.slay_quantity;
 
   const potion = getPotion(tier);
@@ -157,7 +169,7 @@ export async function resolveDueHerbalism(row) {
   const totalXp = xpPerUnit * quantity;
   const xpResult = addSkillXp(guildId, userId, 'herbalism', totalXp);
 
-  let text = `<@${userId}> **${displayName}** returns from brewing — **${totalYield}x ${potion.name}**${doubledCount > 0 ? ` (${doubledCount} doubled by Herbal Flask)` : ''}.`;
+  let text = `<@${userId}> **${displayName}** returns from brewing${useBoostedMode ? ' at the Apothecary' : ''} — **${totalYield}x ${potion.name}**${doubledCount > 0 ? ` (${doubledCount} doubled by Herbal Flask)` : ''}.`;
   if (foundFlask) text += `\n\n🧪 You found a **Herbal Flask**!`;
   text += `\n✨ **+${totalXp.toLocaleString('en-US')} Herbalism XP**`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;

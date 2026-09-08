@@ -1,12 +1,12 @@
 import { GLOBAL_ID } from './globalId.js';
 import { ITEMS, getItem } from '../data/items.js';
-import { getSkillLevel, addSkillXp } from './skills.js';
-import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
+import { getSkillLevel, addSkillXp, formatOutfitBonusNote } from './skills.js';
+import { ensureGladiator, isGladiatorAdventuring, hasUnclaimedAdventure, endGladiatorAdventure, getGladiatorProfile, formatGladiatorDisplayName, hasInstantTrips, INSTANT_TRIP_SECONDS, awardGladiatorXpFromSkilling, formatGladiatorSkillingXpLine } from './gladiator.js';
 import { buildBossChallengeStatusLine } from './bossChallenges.js';
 import { EconomyError } from './economy.js';
 import { addItemToInventory, getOwnedQuantity } from './inventory.js';
 import db from '../database.js';
-import { rollSpecialToolFind } from './specialToolFinds.js';
+import { rollSpecialToolFind, rollSkillingOutfitFind } from './specialToolFinds.js';
 import { recordLastTripSettings, skillRepeatTripRow } from './lastTripSettings.js';
 import { recordCollectionLogObtain } from './collectionLog.js';
 import { getConstructionCostReductionPercent, applyConstructionCostReduction, computeAffordableQuantity, getConstructionTripTimeReductionPercent, applyConstructionTripTimeReduction, getProjectCurrentTier } from './construction.js';
@@ -216,7 +216,7 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
     const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'fletching');
     const tripSeconds = hasInstantTrips(guildId, userId)
-      ? 30
+      ? INSTANT_TRIP_SECONDS
       : applyConstructionTripTimeReduction(computeFletchingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
     const endsAt = Date.now() + tripSeconds * 1000;
 
@@ -271,7 +271,7 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
     const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'fletching');
     const tripSeconds = hasInstantTrips(guildId, userId)
-      ? 30
+      ? INSTANT_TRIP_SECONDS
       : applyConstructionTripTimeReduction(computeFletchingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
     const endsAt = Date.now() + tripSeconds * 1000;
 
@@ -327,7 +327,7 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
     const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
     const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'fletching');
     const tripSeconds = hasInstantTrips(guildId, userId)
-      ? 30
+      ? INSTANT_TRIP_SECONDS
       : applyConstructionTripTimeReduction(computeFletchingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
     const endsAt = Date.now() + tripSeconds * 1000;
 
@@ -386,7 +386,7 @@ export async function startFletchingTrip(guildId, userId, channelId, fallbackNam
   const gladiatorRow = ensureGladiator(guildId, userId, fallbackName);
   const constructionTripTimeReductionPercent = getConstructionTripTimeReductionPercent(userId, 'fletching');
   const tripSeconds = hasInstantTrips(guildId, userId)
-    ? 30
+    ? INSTANT_TRIP_SECONDS
     : applyConstructionTripTimeReduction(computeFletchingTripSeconds(tier, quantity, useBoostedMode), constructionTripTimeReductionPercent);
   const endsAt = Date.now() + tripSeconds * 1000;
 
@@ -424,9 +424,11 @@ export async function resolveDueFletching(row) {
     const xpPerUnit = XP_PER_UNIT_BY_TIER[product.tier] ?? (2 + Math.round(product.tier / 10));
     const totalXp = xpPerUnit * quantity;
     const xpResult = addSkillXp(guildId, userId, 'fletching', totalXp);
+    const foundOutfitPiece = rollSkillingOutfitFind(guildId, userId, 'fletching', row.adventure_started_at, row.adventure_ends_at);
 
     let text = `<@${userId}> **${displayName}** returns from fletching${useForge ? " at the Fletcher's Workbench" : ''} — **${quantity}x ${product.name}**.`;
-    text += `\n✨ **+${totalXp.toLocaleString('en-US')} Fletching XP**`;
+    if (foundOutfitPiece) text += `\n\n🏹 You found the **${foundOutfitPiece.name}**!`;
+    text += `\n✨ **+${xpResult.xpGained.toLocaleString('en-US')} Fletching XP**${formatOutfitBonusNote(xpResult.outfitBonusPercent)}`;
     if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
 
     const gladXpResult = awardGladiatorXpFromSkilling(guildId, userId, xpResult.xpGained, name);
@@ -456,6 +458,7 @@ export async function resolveDueFletching(row) {
   const foundKnife = rollSpecialToolFind(
     guildId, userId, ARROWSMITHS_KNIFE_ID, row.adventure_started_at, row.adventure_ends_at, ARROWSMITHS_KNIFE_FIND_PERCENT
   );
+  const foundOutfitPiece = rollSkillingOutfitFind(guildId, userId, 'fletching', row.adventure_started_at, row.adventure_ends_at);
 
   const xpPerUnit = XP_PER_UNIT_BY_TIER[tier] ?? (2 + Math.round(tier / 10));
   const totalXp = xpPerUnit * quantity;
@@ -463,7 +466,8 @@ export async function resolveDueFletching(row) {
 
   let text = `<@${userId}> **${displayName}** returns from fletching${useForge ? " at the Fletcher's Workbench" : ''} — **${totalYield}x ${arrow.name}**${doubledCount > 0 ? ` (${doubledCount} doubled by Arrowsmith's Knife)` : ''}.`;
   if (foundKnife) text += `\n\n🗡️ You found an **Arrowsmith Knife**!`;
-  text += `\n✨ **+${totalXp.toLocaleString('en-US')} Fletching XP**`;
+  if (foundOutfitPiece) text += `\n\n🏹 You found the **${foundOutfitPiece.name}**!`;
+  text += `\n✨ **+${xpResult.xpGained.toLocaleString('en-US')} Fletching XP**${formatOutfitBonusNote(xpResult.outfitBonusPercent)}`;
   if (xpResult.leveledUp) text += ` — 🆙 **Level ${xpResult.afterLevel}!**`;
 
   const gladXpResult = awardGladiatorXpFromSkilling(guildId, userId, xpResult.xpGained, name);
